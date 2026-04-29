@@ -1,0 +1,76 @@
+version: "3.9"
+
+# -----------------------------------------------------------------------
+# Grid Trading Bot — Docker Compose
+#
+# Services:
+#   redis  — in-memory cache for prices, grid state, AI output, risk flags
+#   bot    — the trading bot
+#
+# SQLite database and logs live in named volumes on the host.
+#
+# Usage:
+#   docker compose up -d              # start all
+#   docker compose logs -f bot        # follow bot logs
+#   docker compose exec bot python main.py backtest --start 2024-01-01 --end 2024-06-30
+#   docker compose down               # stop all (data is preserved)
+# -----------------------------------------------------------------------
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"   # remove this line in production to avoid exposure
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 64M    # Redis is lightweight; protect Pi RAM
+
+  bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: gridbot:latest
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Override config values via env vars if needed:
+      # BINANCE_API_KEY and BINANCE_API_SECRET are read by config/config.yaml
+      # Prefer using .env file (see .env.example)
+    env_file:
+      - ../.env
+    volumes:
+      - bot_data:/app/data          # SQLite database
+      - bot_logs:/app/logs          # Rotating log files
+      - ../config:/app/config:ro    # Config is read-only inside container
+    ports:
+      - "8080:8080"                 # Monitoring endpoint
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/status')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M   # Generous for Pi 4; tune down for Pi 3
+
+volumes:
+  redis_data:
+  bot_data:
+  bot_logs:

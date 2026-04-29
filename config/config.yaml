@@ -1,0 +1,75 @@
+trading:
+  symbol: "BTCUSDT"
+  # Modes: dry_run (print only), paper (simulated fills, real data), live (real money)
+  mode: "paper"
+  # Must be set to true before live mode is allowed
+  live_confirmation: false
+
+capital:
+  # All amounts in USDT (convert EUR at current rate before setting)
+  total_usdt: 540.0         # ~500 EUR
+  active_trading_usdt: 324.0 # ~300 EUR
+  reserve_usdt: 216.0        # ~200 EUR
+  order_size_usdt: 29.0      # ~27 EUR per grid level
+
+grid:
+  range_percent: 5.0         # ±5% around current price
+  levels: 10
+  spacing_percent: 1.0
+  # Grid is rebuilt when price moves outside current range
+  rebuild_threshold_percent: 3.0
+
+risk:
+  max_drawdown_percent: 8.0
+  consecutive_loss_limit: 3
+  cooldown_minutes: 20
+  # Triggers emergency exit when price moves this much within the window
+  emergency_price_move_percent: 7.0
+  emergency_price_window_seconds: 300
+
+ai_filter:
+  enabled: true
+  # Use the smallest capable model for Raspberry Pi
+  model: "llama3.2:1b"
+  base_url: "http://localhost:11434"
+  cache_ttl_seconds: 60
+  call_interval_seconds: 60
+  # Default regime when Ollama is unavailable
+  fallback_regime: "high_volatility"
+
+binance:
+  # Set testnet: false for live trading
+  testnet: true
+  api_key: ""
+  api_secret: ""
+  ws_reconnect_delay_seconds: 5
+  ws_max_reconnect_delay_seconds: 60
+  order_retry_attempts: 3
+  order_retry_delay_seconds: 2.0
+  # User data stream keepalive interval
+  listen_key_refresh_minutes: 30
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: ""
+  ttl:
+    price_seconds: 10
+    grid_state_seconds: 300
+    ai_output_seconds: 60
+    risk_flags_seconds: 3600
+
+database:
+  path: "data/trading_bot.db"
+
+logging:
+  level: "INFO"
+  path: "logs/"
+  max_bytes: 10485760   # 10 MB
+  backup_count: 5
+
+monitoring:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
