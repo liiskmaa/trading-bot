@@ -144,9 +144,12 @@ class OrderExecutor:
                     logger.warning("Paper: insufficient BTC for SELL at %.2f", price)
                     continue
 
-            await self._repo.mark_order_filled(
+            updated = await self._repo.mark_order_filled(
                 order["client_order_id"], qty, status="PAPER_FILLED"
             )
+            if not updated:
+                # A concurrent simulate_fills task already processed this order
+                continue
             await self._repo.insert_trade(
                 {
                     "client_order_id": order["client_order_id"],

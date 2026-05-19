@@ -97,7 +97,11 @@ class Reconciler:
                     client_order_id, exec_qty, status
                 )
                 if status == "FILLED":
-                    fill_price = float(result.get("price", 0))
+                    cum_quote = float(result.get("cummulativeQuoteQty", 0))
+                    fill_price = (
+                        cum_quote / exec_qty if exec_qty > 0
+                        else float(result.get("price", 0))
+                    )
                     await self._grid.on_order_filled(client_order_id, fill_price, exec_qty)
             else:
                 await self._repo.mark_order_filled(client_order_id, exec_qty, "CANCELLED")

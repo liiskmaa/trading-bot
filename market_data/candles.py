@@ -35,7 +35,7 @@ class CandleAggregator:
                 await self._flush(self._current)
             self._current = {
                 "symbol": self._symbol,
-                "interval": f"{self._interval}s",
+                "interval": "1m",
                 "open_time": bucket,
                 "open": price,
                 "high": price,

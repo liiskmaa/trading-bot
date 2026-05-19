@@ -76,10 +76,10 @@ class Bot:
 
     async def run(self) -> None:
         logger.info("Bot starting — mode=%s symbol=%s", self._mode, self._symbol)
-        await self._repo.log_event("BOT_START", f"mode={self._mode}")
 
-        # Open infrastructure
+        # Open infrastructure first — log_event requires an open DB
         await self._repo.open()
+        await self._repo.log_event("BOT_START", f"mode={self._mode}")
         await self._cache.connect()
 
         if self._mode == "live":
@@ -92,16 +92,16 @@ class Bot:
             )
         # dry_run: no REST needed
 
-        # Start WebSocket streams
-        await self._ws.start()
-
-        # Restore grid from DB or build fresh
+        # Restore grid from DB or build fresh before WebSocket starts delivering ticks
         restored = await self._grid.restore()
         if restored and self._mode == "live":
             await self._reconciler.run()
         elif not restored:
             price = await self._get_initial_price()
             await self._grid.build(price)
+
+        # Start WebSocket streams after grid is ready
+        await self._ws.start()
 
         # Start background tasks
         tasks = [
@@ -120,7 +120,10 @@ class Bot:
         logger.info("Bot RUNNING")
 
         try:
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError):
+                    logger.error("Background task error: %s", r)
         except asyncio.CancelledError:
             pass
         finally:
@@ -135,7 +138,7 @@ class Bot:
         Synchronous — called from WS message handler.
         Schedules async work without blocking the WS receive loop.
         """
-        asyncio.get_event_loop().create_task(self._process_tick(price))
+        asyncio.get_running_loop().create_task(self._process_tick(price))
 
     async def _process_tick(self, price: float) -> None:
         if self._state in (BotState.EMERGENCY_STOP, BotState.STOPPING):
@@ -150,8 +153,8 @@ class Bot:
         if risk_state == RiskState.EMERGENCY_STOP:
             return  # _on_risk_stop already called
 
-        # Paper fill simulation
-        if self._mode in ("paper", "dry_run"):
+        # Paper fill simulation — only when actively running (not PAUSED/COOLDOWN)
+        if self._mode in ("paper", "dry_run") and self._state == BotState.RUNNING:
             await self._executor.simulate_fills(price)
 
         # AI regime check (rate-limited)
@@ -166,7 +169,7 @@ class Bot:
     # ------------------------------------------------------------------ #
 
     def on_execution_report(self, msg: dict) -> None:
-        asyncio.get_event_loop().create_task(self._process_execution(msg))
+        asyncio.get_running_loop().create_task(self._process_execution(msg))
 
     async def _process_execution(self, msg: dict) -> None:
         status = msg.get("X")
@@ -212,17 +215,34 @@ class Bot:
             await self._grid.on_order_filled(cid, fill_price, fill_qty)
 
             if self._monitoring:
-                self._monitoring.record_trade(side)
+                self._monitoring.record_trade(side, fill_price, fill_qty)
 
     # ------------------------------------------------------------------ #
     # Paper fill callback (from OrderExecutor)
     # ------------------------------------------------------------------ #
 
     async def _on_paper_fill(self, client_order_id: str, fill_price: float, fill_qty: float) -> None:
-        if self._monitoring:
-            order = await self._repo.get_order(client_order_id)
-            if order:
-                self._monitoring.record_trade(order["side"])
+        order = await self._repo.get_order(client_order_id)
+        if order:
+            side = order["side"]
+            realized_pnl = 0.0
+            if side == "SELL":
+                # Realize PnL: sell at fill_price, paired buy was at the level below
+                level_idx = order.get("grid_level_idx") or 0
+                levels = self._grid.levels
+                if 0 < level_idx < len(levels):
+                    buy_price = levels[level_idx - 1].price
+                    realized_pnl = (
+                        fill_price * fill_qty * (1 - 0.001)
+                        - buy_price * fill_qty * (1 + 0.001)
+                    )
+                portfolio_value = (
+                    self._executor.paper_balances.get("USDT", 0)
+                    + self._executor.paper_balances.get("BTC", 0) * fill_price
+                )
+                self._risk.on_trade_result(realized_pnl, portfolio_value)
+            if self._monitoring:
+                self._monitoring.record_trade(side, fill_price, fill_qty, realized_pnl)
         await self._grid.on_order_filled(client_order_id, fill_price, fill_qty)
 
     # ------------------------------------------------------------------ #
@@ -357,8 +377,12 @@ class Bot:
             "portfolio_value": self._executor.paper_balances.get("USDT", 0)
             if self._mode in ("paper", "dry_run")
             else 0,
-            "consecutive_losses": self._risk._consecutive_losses,
+            "consecutive_losses": self._risk.consecutive_losses,
             "cooldown_remaining": round(self._risk.cooldown_remaining_seconds, 0),
+            "grid_levels": [
+                {"idx": lv.idx, "price": lv.price, "side": lv.side, "status": lv.status}
+                for lv in self._grid.levels
+            ],
         }
 
     async def _shutdown(self) -> None:
@@ -368,6 +392,6 @@ class Bot:
         if self._rest:
             await self._rest.close()
         await self._cache.close()
-        await self._repo.close()
         await self._repo.log_event("BOT_STOP", "graceful shutdown")
+        await self._repo.close()
         logger.info("Bot stopped")

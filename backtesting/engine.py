@@ -181,17 +181,17 @@ class BacktestEngine:
                             }
                         )
 
-            # Reset filled levels for next tick
+            # Activate paired orders only when the target level is still PENDING —
+            # prevents overwriting a same-candle fill at an adjacent level.
             for lv in levels:
                 if lv.status == "BUY_FILLED":
-                    # Activate paired sell at level+1
                     next_idx = lv.idx + 1
-                    if next_idx < len(levels):
+                    if next_idx < len(levels) and levels[next_idx].status == "PENDING":
                         levels[next_idx].status = "SELL_OPEN"
                     lv.status = "PENDING"
                 elif lv.status == "SELL_FILLED":
                     prev_idx = lv.idx - 1
-                    if prev_idx >= 0:
+                    if prev_idx >= 0 and levels[prev_idx].status == "PENDING":
                         levels[prev_idx].status = "BUY_OPEN"
                     lv.status = "PENDING"
 

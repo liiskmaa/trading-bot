@@ -43,6 +43,7 @@ class BinanceWebSocket:
         self._listen_key: Optional[str] = None
         self._running = False
         self._tasks: list[asyncio.Task] = []
+        self._user_data_task: Optional[asyncio.Task] = None
 
     def set_listen_key(self, key: str) -> None:
         self._listen_key = key
@@ -53,9 +54,10 @@ class BinanceWebSocket:
             asyncio.create_task(self._ticker_loop(), name="ws-ticker"),
         ]
         if self._listen_key:
-            self._tasks.append(
-                asyncio.create_task(self._user_data_loop(), name="ws-user-data")
+            self._user_data_task = asyncio.create_task(
+                self._user_data_loop(), name="ws-user-data"
             )
+            self._tasks.append(self._user_data_task)
 
     async def stop(self) -> None:
         self._running = False
@@ -97,11 +99,12 @@ class BinanceWebSocket:
     # ------------------------------------------------------------------ #
 
     async def _user_data_loop(self) -> None:
-        if not self._listen_key:
-            return
-        url = f"{self._base}/{self._listen_key}"
         delay = self._reconnect_delay
         while self._running:
+            if not self._listen_key:
+                await asyncio.sleep(delay)
+                continue
+            url = f"{self._base}/{self._listen_key}"
             try:
                 async with websockets.connect(url, ping_interval=20) as ws:
                     logger.info("User-data WS connected")
@@ -123,5 +126,7 @@ class BinanceWebSocket:
                 delay = min(delay * 2, self._max_reconnect_delay)
 
     def update_listen_key(self, key: str) -> None:
-        """Hot-swap the listen key without full reconnect on next reconnect cycle."""
+        """Hot-swap the listen key and force an immediate reconnect."""
         self._listen_key = key
+        if self._user_data_task and not self._user_data_task.done():
+            self._user_data_task.cancel()

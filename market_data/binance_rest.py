@@ -92,6 +92,19 @@ class BinanceRest:
                     await _sleep(self._retry_delay * (attempt + 1))
         raise RuntimeError(f"POST {path} failed after {self._retries} attempts")
 
+    async def _signed_put(self, path: str, params: dict) -> Any:
+        for attempt in range(self._retries):
+            try:
+                signed = self._signed_params(params)
+                r = await self._client.put(path, data=signed)
+                r.raise_for_status()
+                return r.json()
+            except Exception as e:
+                logger.warning("PUT %s attempt %d failed: %s", path, attempt + 1, e)
+                if attempt < self._retries - 1:
+                    await _sleep(self._retry_delay * (attempt + 1))
+        raise RuntimeError(f"PUT {path} failed after {self._retries} attempts")
+
     async def _signed_delete(self, path: str, params: dict) -> Any:
         for attempt in range(self._retries):
             try:
@@ -192,8 +205,7 @@ class BinanceRest:
         return data["listenKey"]
 
     async def keepalive_listen_key(self, listen_key: str) -> None:
-        params = self._signed_params({"listenKey": listen_key})
-        await self._client.put("/api/v3/userDataStream", data=params)
+        await self._signed_put("/api/v3/userDataStream", {"listenKey": listen_key})
 
     async def delete_listen_key(self, listen_key: str) -> None:
         params = self._signed_params({"listenKey": listen_key})

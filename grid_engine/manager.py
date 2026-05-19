@@ -106,7 +106,7 @@ class GridManager:
                 side=r["side"],
                 status=r["status"],
                 client_order_id=r.get("client_order_id"),
-                quantity=0.0,
+                quantity=r.get("quantity") or 0.0,
             )
             for r in rows
         ]
@@ -233,6 +233,7 @@ class GridManager:
                 "symbol": self._symbol,
                 "level_idx": level.idx,
                 "price": level.price,
+                "quantity": level.quantity,
                 "side": level.side,
                 "status": level.status,
                 "client_order_id": level.client_order_id,

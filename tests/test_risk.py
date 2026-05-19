@@ -80,6 +80,60 @@ class TestConsecutiveLossRule:
         assert state == RiskState.OK
 
 
+class TestOnTradeResultStateGuard:
+    def test_skips_when_in_cooldown(self):
+        risk = make_risk(consecutive_loss_limit=2, cooldown_minutes=10.0)
+        risk.on_trade_result(-1.0, 299.0)
+        risk.on_trade_result(-1.0, 298.0)
+        assert risk.state == RiskState.COOLDOWN
+
+        value_before = risk._current_value
+        risk.on_trade_result(-50.0, 100.0)  # big loss — must be ignored
+        assert risk._current_value == value_before
+        assert risk.state == RiskState.COOLDOWN
+
+    def test_skips_when_in_emergency_stop(self):
+        risk = make_risk()
+        risk.on_trade_result(-300.0, 0.0)  # triggers emergency (100% drawdown)
+        assert risk.state == RiskState.EMERGENCY_STOP
+
+        risk.on_trade_result(+300.0, 600.0)  # ignored
+        assert risk.state == RiskState.EMERGENCY_STOP
+
+    def test_cooldown_does_not_count_extra_losses(self):
+        risk = make_risk(consecutive_loss_limit=2, cooldown_minutes=10.0)
+        risk.on_trade_result(-1.0, 299.0)
+        risk.on_trade_result(-1.0, 298.0)
+        initial_losses = risk.consecutive_losses
+
+        risk.on_trade_result(-1.0, 297.0)  # ignored during cooldown
+        assert risk.consecutive_losses == initial_losses
+
+
+class TestConsecutiveLossesProperty:
+    def test_starts_at_zero(self):
+        risk = make_risk()
+        assert risk.consecutive_losses == 0
+
+    def test_increments_on_loss(self):
+        risk = make_risk()
+        risk.on_trade_result(-1.0, 299.0)
+        assert risk.consecutive_losses == 1
+
+    def test_resets_on_win(self):
+        risk = make_risk()
+        risk.on_trade_result(-1.0, 299.0)
+        risk.on_trade_result(-1.0, 298.0)
+        risk.on_trade_result(+2.0, 300.0)
+        assert risk.consecutive_losses == 0
+
+    def test_reflects_current_count(self):
+        risk = make_risk(consecutive_loss_limit=5)
+        for i in range(3):
+            risk.on_trade_result(-1.0, 297.0 - i)
+        assert risk.consecutive_losses == 3
+
+
 class TestPriceVelocityRule:
     def test_no_trigger_for_small_move(self):
         risk = make_risk(emergency_price_move_percent=7.0, emergency_window_seconds=300)

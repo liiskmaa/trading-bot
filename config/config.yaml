@@ -15,7 +15,6 @@ capital:
 grid:
   range_percent: 5.0         # ±5% around current price
   levels: 10
-  spacing_percent: 1.0
   # Grid is rebuilt when price moves outside current range
   rebuild_threshold_percent: 3.0
 

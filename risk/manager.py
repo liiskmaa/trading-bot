@@ -77,6 +77,8 @@ class RiskManager:
 
     def on_trade_result(self, realized_pnl: float, portfolio_value: float) -> RiskState:
         """Call after every completed buy→sell cycle."""
+        if self._state != RiskState.OK:
+            return self._state
         self._current_value = portfolio_value
         self._peak_value = max(self._peak_value, portfolio_value)
 
@@ -123,6 +125,10 @@ class RiskManager:
         return (self._peak_value - self._current_value) / self._peak_value * 100
 
     @property
+    def consecutive_losses(self) -> int:
+        return self._consecutive_losses
+
+    @property
     def cooldown_remaining_seconds(self) -> float:
         return max(0.0, self._cooldown_until - time.time())
 
@@ -148,7 +154,7 @@ class RiskManager:
         self._stop_reason = reason
         logger.critical("EMERGENCY STOP: %s", reason)
         if self._on_stop:
-            asyncio.create_task(self._on_stop(reason))
+            asyncio.get_running_loop().create_task(self._on_stop(reason))
 
     def _trigger_cooldown(self) -> None:
         self._state = RiskState.COOLDOWN
@@ -162,4 +168,4 @@ class RiskManager:
             self._stop_reason,
         )
         if self._on_stop:
-            asyncio.create_task(self._on_stop(self._stop_reason))
+            asyncio.get_running_loop().create_task(self._on_stop(self._stop_reason))

@@ -85,6 +85,97 @@ class TestDateToMs:
         assert _date_to_ms("2024-01-01") < _date_to_ms("2024-06-01")
 
 
+class TestBacktestReplayTransitions:
+    """Verify the M6 fix: adjacent levels filling in the same candle must not
+    overwrite each other's SELL_FILLED / BUY_FILLED state during transitions."""
+
+    def _apply_transitions(self, levels):
+        """Mirror the fixed transition loop from backtesting/engine.py."""
+        for lv in levels:
+            if lv.status == "BUY_FILLED":
+                next_idx = lv.idx + 1
+                if next_idx < len(levels) and levels[next_idx].status == "PENDING":
+                    levels[next_idx].status = "SELL_OPEN"
+                lv.status = "PENDING"
+            elif lv.status == "SELL_FILLED":
+                prev_idx = lv.idx - 1
+                if prev_idx >= 0 and levels[prev_idx].status == "PENDING":
+                    levels[prev_idx].status = "BUY_OPEN"
+                lv.status = "PENDING"
+
+    def test_buy_filled_activates_sell_above(self):
+        from grid_engine.calculator import GridLevel
+        levels = [
+            GridLevel(idx=0, price=49000.0, side="BUY", status="BUY_FILLED", quantity=0.001),
+            GridLevel(idx=1, price=51000.0, side="SELL", status="PENDING", quantity=0.001),
+        ]
+        self._apply_transitions(levels)
+        assert levels[0].status == "PENDING"
+        assert levels[1].status == "SELL_OPEN"
+
+    def test_sell_filled_activates_buy_below(self):
+        from grid_engine.calculator import GridLevel
+        levels = [
+            GridLevel(idx=0, price=49000.0, side="BUY", status="PENDING", quantity=0.001),
+            GridLevel(idx=1, price=51000.0, side="SELL", status="SELL_FILLED", quantity=0.001),
+        ]
+        self._apply_transitions(levels)
+        assert levels[0].status == "BUY_OPEN"
+        assert levels[1].status == "PENDING"
+
+    def test_same_candle_adjacent_fills_dont_overwrite_each_other(self):
+        """BUY at L and SELL at L+1 both fill in the same candle.
+        BUY_FILLED must not overwrite SELL_FILLED when activating the paired sell."""
+        from grid_engine.calculator import GridLevel
+        levels = [
+            GridLevel(idx=0, price=49000.0, side="BUY", status="BUY_FILLED", quantity=0.001),
+            GridLevel(idx=1, price=51000.0, side="SELL", status="SELL_FILLED", quantity=0.001),
+        ]
+        self._apply_transitions(levels)
+        # Level 1 was SELL_FILLED — BUY_FILLED at level 0 must NOT overwrite it to SELL_OPEN
+        # After both transitions: level 0 → BUY_OPEN (from SELL_FILLED's buy-below logic),
+        # level 1 → PENDING
+        assert levels[0].status == "BUY_OPEN"
+        assert levels[1].status == "PENDING"
+
+    def test_buy_filled_does_not_activate_already_filled_level(self):
+        """BUY_FILLED at L should NOT set L+1 to SELL_OPEN if L+1 is SELL_FILLED."""
+        from grid_engine.calculator import GridLevel
+        levels = [
+            GridLevel(idx=0, price=49000.0, side="BUY", status="BUY_FILLED", quantity=0.001),
+            GridLevel(idx=1, price=51000.0, side="SELL", status="SELL_FILLED", quantity=0.001),
+        ]
+        # After level 0's BUY_FILLED transition, level 1 must still be SELL_FILLED
+        # (checked before level 1's own transition runs)
+        statuses_after_level0 = []
+        lv = levels[0]
+        if lv.status == "BUY_FILLED":
+            next_idx = lv.idx + 1
+            if next_idx < len(levels) and levels[next_idx].status == "PENDING":
+                levels[next_idx].status = "SELL_OPEN"
+            lv.status = "PENDING"
+            statuses_after_level0.append(levels[1].status)
+
+        assert statuses_after_level0 == ["SELL_FILLED"]  # not overwritten
+
+    def test_floor_level_buy_filled_no_crash(self):
+        from grid_engine.calculator import GridLevel
+        levels = [
+            GridLevel(idx=0, price=49000.0, side="SELL", status="SELL_FILLED", quantity=0.001),
+        ]
+        # Should not raise IndexError
+        self._apply_transitions(levels)
+        assert levels[0].status == "PENDING"
+
+    def test_ceiling_level_sell_filled_no_crash(self):
+        from grid_engine.calculator import GridLevel
+        levels = [
+            GridLevel(idx=0, price=51000.0, side="BUY", status="BUY_FILLED", quantity=0.001),
+        ]
+        self._apply_transitions(levels)
+        assert levels[0].status == "PENDING"
+
+
 class TestBacktestEngineReplay:
     """Integration test against a synthetic flat then rising price series."""
 

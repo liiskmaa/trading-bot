@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS grid_levels (
     symbol           TEXT    NOT NULL,
     level_idx        INTEGER NOT NULL,
     price            REAL    NOT NULL,
+    quantity         REAL    NOT NULL DEFAULT 0.0,
     side             TEXT    NOT NULL,          -- current expected side
     status           TEXT    NOT NULL DEFAULT 'PENDING',
     -- PENDING | BUY_OPEN | BUY_FILLED | SELL_OPEN | SELL_FILLED | DISABLED
@@ -88,7 +89,18 @@ CREATE INDEX IF NOT EXISTS idx_events_type_time    ON system_events(event_type, 
 """
 
 
+_MIGRATIONS = [
+    "ALTER TABLE grid_levels ADD COLUMN quantity REAL NOT NULL DEFAULT 0.0",
+]
+
+
 async def init_schema(db) -> None:
     """Run schema creation on an open aiosqlite connection."""
     await db.executescript(SCHEMA_SQL)
     await db.commit()
+    for sql in _MIGRATIONS:
+        try:
+            await db.execute(sql)
+            await db.commit()
+        except Exception:
+            pass  # column already exists on upgraded databases

@@ -84,12 +84,20 @@ class Repository:
 
     async def mark_order_filled(
         self, client_order_id: str, executed_qty: float, status: str = "FILLED"
-    ) -> None:
-        await self._db.execute(
-            "UPDATE orders SET status=?, executed_qty=?, updated_at=? WHERE client_order_id=?",
-            (status, executed_qty, time.time(), client_order_id),
-        )
+    ) -> bool:
+        if status == "PAPER_FILLED":
+            cur = await self._db.execute(
+                "UPDATE orders SET status=?, executed_qty=?, updated_at=? "
+                "WHERE client_order_id=? AND status='PAPER_OPEN'",
+                (status, executed_qty, time.time(), client_order_id),
+            )
+        else:
+            cur = await self._db.execute(
+                "UPDATE orders SET status=?, executed_qty=?, updated_at=? WHERE client_order_id=?",
+                (status, executed_qty, time.time(), client_order_id),
+            )
         await self._db.commit()
+        return cur.rowcount > 0
 
     # ------------------------------------------------------------------ #
     # Trades
@@ -134,11 +142,12 @@ class Repository:
         await self._db.execute(
             """
             INSERT INTO grid_levels
-                (symbol, level_idx, price, side, status, client_order_id,
+                (symbol, level_idx, price, quantity, side, status, client_order_id,
                  created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol, level_idx) DO UPDATE SET
                 price           = excluded.price,
+                quantity        = excluded.quantity,
                 side            = excluded.side,
                 status          = excluded.status,
                 client_order_id = excluded.client_order_id,
@@ -148,6 +157,7 @@ class Repository:
                 level["symbol"],
                 level["level_idx"],
                 level["price"],
+                level.get("quantity", 0.0),
                 level["side"],
                 level.get("status", "PENDING"),
                 level.get("client_order_id"),
