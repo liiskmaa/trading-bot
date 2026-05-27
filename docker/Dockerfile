@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 # Upgrade pip first so it can resolve manylinux aarch64 wheels correctly.
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --user -r requirements.txt
+    pip install --no-cache-dir --prefer-binary --user -r requirements.txt
 
 
 FROM python:3.11-slim
