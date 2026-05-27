@@ -6,14 +6,18 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-# Install build tools (needed for some packages' C extensions)
+# Install build tools (needed for numpy/scikit-learn C extensions on ARM64).
+# build-essential includes gcc + libc6-dev headers; without libc6-dev the
+# meson build system reports "Compiler cc cannot compile programs."
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    build-essential \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Upgrade pip first so it can resolve manylinux aarch64 wheels correctly.
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --user -r requirements.txt
 
 
 FROM python:3.11-slim
