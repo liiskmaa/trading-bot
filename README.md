@@ -8,6 +8,57 @@ Grid trading bot for Binance BTC/USDT. Runs unattended on a Raspberry Pi. Design
 
 ---
 
+## Quick start (Raspberry Pi)
+
+Five commands to go from zero to a running bot in paper mode.
+
+**1. Pull the code**
+```bash
+git clone https://github.com/your-repo/trading-bot.git
+cd trading-bot
+```
+
+**2. Add API keys**
+```bash
+cp .env.example .env
+nano .env   # paste your Binance testnet keys, save with Ctrl+X → Y → Enter
+```
+Get testnet keys at [testnet.binance.vision](https://testnet.binance.vision) — no real money involved.
+
+**3. Build the bot image** *(takes 5–10 min first time)*
+```bash
+docker build -t gridbot:latest -f docker/Dockerfile .
+```
+
+**4. Start everything**
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+This starts Redis, the bot, Prometheus, and Grafana all at once.
+
+**5. Check it's working**
+```bash
+docker compose -f docker/docker-compose.yml logs -f bot
+```
+You should see the grid being built and price ticks arriving. Press `Ctrl+C` to stop following logs — the bot keeps running.
+
+**Open the dashboards** (replace `<pi-ip>` with your Pi's IP — find it with `hostname -I`):
+
+| What | URL |
+|---|---|
+| Bot status | `http://<pi-ip>:8080` |
+| Grafana | `http://<pi-ip>:3000` — login: admin / admin |
+
+**After ~8 hours — train the AI classifier**
+```bash
+docker compose -f docker/docker-compose.yml exec bot python main.py train-regime
+docker compose -f docker/docker-compose.yml restart bot
+```
+
+The bot is safe to run without the trained model — it defaults to pausing trading until training is done.
+
+---
+
 ## How it works
 
 Grid trading doesn't try to predict where price is going. Instead, it places a ladder of limit orders above and below the current price — buy orders below, sell orders above — and profits from the market oscillating back and forth.
@@ -108,7 +159,7 @@ Run the tests to make sure everything is in order:
 pytest
 ```
 
-You should see 45 tests pass.
+You should see 206 tests pass.
 
 ---
 
