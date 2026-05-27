@@ -116,11 +116,8 @@ def build_bot(cfg: Config, mode_override: str | None = None) -> Bot:
 
     # AI filter
     ai = MarketClassifier(
-        model=cfg.str("ai_filter", "model", default="llama3.2:1b"),
-        base_url=cfg.str("ai_filter", "base_url", default="http://localhost:11434"),
         cache_ttl_seconds=cfg.int("ai_filter", "cache_ttl_seconds", default=60),
         call_interval_seconds=cfg.int("ai_filter", "call_interval_seconds", default=60),
-        fallback_regime=cfg.str("ai_filter", "fallback_regime", default="high_volatility"),
     )
     ai.inject(cache, symbol)
 
@@ -223,6 +220,44 @@ def backtest(config, start, end):
         print("\n=== Backtest Results ===")
         print(metrics)
         await rest.close()
+
+    asyncio.run(_run())
+
+
+@cli.command("train-regime")
+@click.option("--config", "-c", default="config/config.yaml", show_default=True)
+@click.option("--min-candles", default=500, show_default=True,
+              help="Minimum candles required before training starts")
+def train_regime(config, min_candles):
+    """Train the market regime classifier from stored candle data.
+
+    The bot must have been running long enough to accumulate candle history
+    (or backtest first to populate the database). Retrain whenever you have
+    significantly more data.
+    """
+    from ai_filter.trainer import train
+
+    cfg = Config(config)
+    setup_logging(cfg)
+
+    repo = Repository(cfg.str("database", "path", default="data/trading_bot.db"))
+    symbol = cfg.str("trading", "symbol", default="BTCUSDT")
+
+    async def _run():
+        await repo.open()
+        candles = await repo.get_candles(symbol, "1m", limit=100_000)
+        await repo.close()
+
+        if len(candles) < min_candles:
+            click.echo(
+                f"Not enough candles: {len(candles)} available, {min_candles} required.\n"
+                "Run the bot in paper mode or run a backtest first."
+            )
+            return
+
+        click.echo(f"Training on {len(candles)} candles...")
+        train(candles)
+        click.echo("Done. Model saved to data/regime_model.pkl")
 
     asyncio.run(_run())
 

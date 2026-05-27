@@ -28,13 +28,8 @@ risk:
 
 ai_filter:
   enabled: true
-  # Use the smallest capable model for Raspberry Pi
-  model: "llama3.2:1b"
-  base_url: "http://localhost:11434"
   cache_ttl_seconds: 60
   call_interval_seconds: 60
-  # Default regime when Ollama is unavailable
-  fallback_regime: "high_volatility"
 
 binance:
   # Set testnet: false for live trading

@@ -255,16 +255,13 @@ class Bot:
         if time.time() - self._last_ai_call < _AI_POLL_INTERVAL:
             return
 
+        candles: list = []
         try:
-            ticker = await self._rest.get_ticker_24h(self._symbol)
-            change_24h = float(ticker.get("priceChangePercent", 0))
-        except Exception:
-            change_24h = 0.0
+            candles = await self._repo.get_candles(self._symbol, "1m", limit=100)
+        except Exception as e:
+            logger.warning("Failed to fetch candles for AI classifier: %s", e)
 
-        regime = await self._ai.classify(
-            price=price,
-            change_24h=change_24h,
-        )
+        regime = await self._ai.classify(candles)
         self._ai_regime = regime
         self._last_ai_call = time.time()
 

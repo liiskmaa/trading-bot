@@ -2,6 +2,10 @@
 
 Grid trading bot for Binance BTC/USDT. Runs unattended on a Raspberry Pi. Designed for small capital (~500 EUR) with an emphasis on not blowing up.
 
+<a href="https://ko-fi.com/jaanek">
+  <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy Me a Coffee at ko-fi.com" />
+</a>
+
 ---
 
 ## How it works
@@ -46,7 +50,7 @@ Four hard rules that cannot be disabled or overridden. They fire before any grid
 
 **Price velocity (7% in 5 minutes)** — If BTC moves more than 7% in either direction within 5 minutes, the bot cancels everything and stops. Flash crashes, exchange glitches, sudden news events — this rule handles all of them.
 
-**AI filter** — A locally-running language model classifies market conditions on every price update (rate-limited to once per minute). If the market looks like it's trending or unusually volatile, the bot pauses grid operations until conditions return to ranging. It never touches existing orders, just stops placing new ones.
+**AI filter** — A trained machine learning classifier reads the last 60 minutes of candle data on every price tick (rate-limited to once per minute) and labels the current market regime: `ranging`, `trending`, or `high_volatility`. If conditions are unfavourable, the bot pauses grid operations until the regime returns to ranging. It never touches existing orders, just stops placing new ones. The model is trained on your own historical candle data — see [Training the AI filter](#training-the-ai-filter).
 
 All percentages and thresholds are configurable.
 
@@ -80,7 +84,6 @@ You'll need:
 - Python 3.11
 - A Binance account — testnet for testing, real account for live
 - Redis (optional — the bot runs fine without it, just no caching)
-- Ollama with `llama3.2:1b` (optional — falls back to "pause trading" if absent)
 
 For Binance API keys, whether testnet or live: enable **Spot & Margin Trading** only. No withdrawal permissions. If your Pi has a static IP, whitelist it.
 
@@ -106,15 +109,6 @@ pytest
 ```
 
 You should see 45 tests pass.
-
-If you want the AI filter working:
-
-```bash
-# install Ollama from https://ollama.com
-ollama pull llama3.2:1b
-```
-
-Without Ollama, the bot defaults to `high_volatility` (trading paused) whenever it tries to classify market conditions. You can disable the filter entirely in config.
 
 ---
 
@@ -174,15 +168,13 @@ Don't raise `max_drawdown_percent` above 10%. Don't lower `consecutive_loss_limi
 ```yaml
 ai_filter:
   enabled: true
-  model: "llama3.2:1b"
-  base_url: "http://localhost:11434"
-  call_interval_seconds: 60          # minimum time between Ollama calls
-  fallback_regime: "high_volatility" # what to assume if Ollama is unreachable
+  call_interval_seconds: 60   # minimum time between classifier calls
+  cache_ttl_seconds: 60       # how long to cache the regime result in Redis
 ```
 
-`llama3.2:1b` is intentionally the smallest capable model — it's fast enough on a Pi and uses minimal RAM. The fallback being `high_volatility` means if Ollama goes down, the bot pauses rather than trading blindly.
+The classifier runs locally — no external services needed. It returns `high_volatility` (trading paused) whenever the trained model file doesn't exist yet, so the bot is always safe to start even before training.
 
-If you don't want the AI filter at all:
+To disable the filter entirely:
 
 ```yaml
 ai_filter:
@@ -247,6 +239,9 @@ python main.py --config /path/to/config.yaml
 
 # backtest
 python main.py backtest --start 2024-01-01 --end 2024-06-30
+
+# train the AI regime classifier (see Training the AI filter below)
+python main.py train-regime
 ```
 
 On a clean start you'll see the grid being built and the price levels logged. On a restart, it reloads the saved grid from the database and in live mode reconciles the current state against the exchange before resuming.
@@ -286,6 +281,8 @@ Run backtest across multiple date ranges, not just a single favourable one.
 
 ## Monitoring
 
+### Built-in dashboard
+
 Open `http://<host>:8080/` in any browser while the bot is running and you get a live dashboard — no setup, no external services, just the built-in HTTP server.
 
 The dashboard is a single page that polls the bot every 3 seconds. It shows:
@@ -297,8 +294,6 @@ The dashboard is a single page that polls the bot every 3 seconds. It shows:
 
 The header shows bot state (running / paused / cooldown / emergency stop), current price, trading mode, AI regime classification, and how long the bot has been up.
 
-If you're accessing this from another machine on the network, just replace `localhost` with the Pi's IP address. If you want it reachable from outside your home network, put a reverse proxy in front of it — don't expose port 8080 directly.
-
 For scripting and external monitoring, the underlying endpoints are also available:
 
 ```
@@ -307,11 +302,34 @@ GET http://<host>:8080/history  → price history, portfolio history, recent tra
 GET http://<host>:8080/metrics  → Prometheus metrics
 ```
 
+### Grafana dashboard
+
+The Docker Compose setup includes Prometheus and Grafana pre-configured with a trading dashboard. Open `http://<host>:3000` (login: `admin` / `admin`) after starting the stack — the dashboard loads automatically.
+
+Panels included:
+
+| Panel | What it shows |
+|---|---|
+| Drawdown % | Current drawdown with colour thresholds (green → yellow at −4%, red at −8%) |
+| Portfolio Value | Current USDT portfolio value |
+| BTC Price | Last known price |
+| Market Regime | Green = ranging (trading active), orange = paused |
+| Open Orders | Number of live limit orders on the grid |
+| Uptime | Time since bot started |
+| BTC Price over time | Price chart for the selected time range |
+| Drawdown over time | Drawdown curve with the 8% emergency-stop line marked |
+| Portfolio value over time | Equity curve |
+| Trade fill rate | BUY and SELL fills per minute (from Prometheus counters) |
+
+Prometheus stores 30 days of history in its own volume, so you can look back at past performance even after restarting the bot.
+
+If you're accessing Grafana from another machine on the network, replace `localhost` with the Pi's IP address. The default `admin` password can be changed via `GF_SECURITY_ADMIN_PASSWORD` in `docker-compose.yml`.
+
 ---
 
 ## Raspberry Pi deployment
 
-The recommended setup is Docker Compose. Redis and the bot run as separate containers.
+The recommended setup is Docker Compose. Four containers start together: Redis, the bot, Prometheus, and Grafana. The AI classifier runs inside the bot container — no additional services needed beyond what's in the compose file.
 
 ### Build the image
 
@@ -339,10 +357,16 @@ docker compose -f docker/docker-compose.yml up -d
 # follow logs
 docker compose logs -f bot
 
-# open the dashboard in a browser (from another machine, use the Pi's IP)
+# built-in dashboard (from another machine, use the Pi's IP)
 # http://localhost:8080/
 
-# or pull the raw JSON
+# Grafana dashboard — login: admin / admin
+# http://localhost:3000/
+
+# Prometheus raw query UI
+# http://localhost:9090/
+
+# pull the bot status as JSON
 curl http://localhost:8080/status
 
 # graceful stop (state is preserved)
@@ -357,19 +381,23 @@ docker compose down
 
 Data (database, logs) is stored in named volumes and survives restarts and image rebuilds. Don't run `docker compose down -v` unless you mean to wipe everything.
 
-### Ollama on the Pi
+### Training the AI filter on the Pi
+
+After the bot has been running for at least 8 hours (or after a backtest has populated the database), train the regime classifier:
 
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.2:1b
+# directly on the Pi
+python main.py train-regime
+
+# or inside Docker
+docker compose exec bot python main.py train-regime
 ```
 
-Then in `config/config.yaml`:
+Training reads all stored 1-minute candles, labels each point by what actually happened in the following 30 minutes, and fits a gradient-boosted classifier. The model is saved to `data/regime_model.pkl` (inside the `bot_data` volume) and loaded automatically on the next bot start.
 
-```yaml
-ai_filter:
-  base_url: "http://localhost:11434"
-```
+The bot does not need to be stopped to train — but you need to restart it (or send it a signal) to reload the new model. The simplest approach is to train, then `docker compose restart bot`.
+
+Retrain whenever you've collected significantly more history, or if the bot seems to be pausing/resuming at the wrong times.
 
 ### Auto-start on boot
 
@@ -402,6 +430,45 @@ sudo systemctl start gridbot
 
 ---
 
+## Training the AI filter
+
+The AI filter uses a gradient-boosted classifier trained on your own candle history. It learns what `ranging`, `trending`, and `high_volatility` look like in terms of price behaviour, then applies that knowledge to incoming ticks.
+
+### How labels are generated
+
+The trainer doesn't need human annotation. For each point in history it looks 30 minutes ahead and labels it automatically:
+
+- **`trending`** — price moved more than 1.5% in a single direction over the next 30 candles
+- **`high_volatility`** — average candle range (ATR) over the next 30 candles was more than 2× the dataset average
+- **`ranging`** — everything else
+
+### What the model learns from
+
+14 features extracted from the last 60 1-minute candles:
+
+- Price returns at 5, 15, 30 and 60-candle windows
+- Average candle range (ATR) at those same windows
+- ATR spike ratio (sudden volatility expansion)
+- Bollinger Band width (range tightness)
+- RSI (momentum)
+- Linear regression slope (directional drift)
+- Average candle body ratio (trending vs indecisive candles)
+- Directional streak count
+
+### When to train
+
+```bash
+python main.py train-regime
+```
+
+The command prints the label distribution and a validation report. You want all three classes represented — if `trending` or `high_volatility` show zero samples, the dataset doesn't yet cover a diverse enough market period. Run a backtest first (`python main.py backtest --start 2024-01-01 --end 2024-12-31`) to populate the candle database before training.
+
+Minimum: 500 candles (~8 hours). Recommended: several weeks or months covering both quiet and volatile periods.
+
+Retrain periodically — monthly is a reasonable cadence. The old model stays active and safe until you replace it.
+
+---
+
 ## Going live
 
 Work through these phases in order. The full checklist with checkboxes is in `SAFETY_CHECKLIST.md`.
@@ -410,7 +477,7 @@ Work through these phases in order. The full checklist with checkboxes is in `SA
 
 **Phase 2 — Backtest.** At least 3 months of data, ideally a period that includes both ranging and trending conditions. Check the numbers above.
 
-**Phase 3 — Paper trading (at least 7 days).** Set `mode: paper` and let it run. Watch that grid fills trigger paired orders, that the AI filter pauses trading when conditions warrant it, and that restarting the bot restores the correct state.
+**Phase 3 — Paper trading (at least 7 days).** Set `mode: paper` and let it run. After a day of data, train the AI classifier (`python main.py train-regime`) and watch that it pauses trading during trending or volatile periods. Verify that grid fills trigger paired orders and that restarting the bot restores the correct state.
 
 **Phase 4 — Testnet live (at least 3 days).** Get testnet keys from [testnet.binance.vision](https://testnet.binance.vision), set `testnet: true`, `mode: live`, `live_confirmation: true`. Verify that orders appear on the testnet UI and that fills land in the database.
 

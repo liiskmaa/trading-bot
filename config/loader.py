@@ -1,3 +1,4 @@
+import os
 import threading
 import logging
 from pathlib import Path
@@ -27,6 +28,12 @@ class Config:
         logger.info("Config reloaded")
 
     def get(self, *keys: str, default: Any = None) -> Any:
+        # Env var override: nested keys joined by __ in upper case
+        # e.g. ("ai_filter", "base_url") → AI_FILTER__BASE_URL
+        env_val = os.environ.get("__".join(k.upper() for k in keys))
+        if env_val is not None:
+            return env_val
+
         with self._lock:
             node = self._data
             for key in keys:

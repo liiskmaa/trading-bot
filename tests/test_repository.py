@@ -152,3 +152,133 @@ class TestSchemaMigration:
         r2 = Repository(db_path)
         await r2.open()
         await r2.close()
+
+
+class TestGetOpenOrders:
+    async def test_returns_paper_open_orders(self, repo):
+        await _insert_order(repo, "open-1", "PAPER_OPEN")
+        await _insert_order(repo, "open-2", "PAPER_OPEN")
+        orders = await repo.get_open_orders("BTCUSDT")
+        cids = {o["client_order_id"] for o in orders}
+        assert {"open-1", "open-2"} == cids
+
+    async def test_excludes_filled_orders(self, repo):
+        await _insert_order(repo, "open-1", "PAPER_OPEN")
+        await _insert_order(repo, "filled-1", "PAPER_FILLED")
+        orders = await repo.get_open_orders("BTCUSDT")
+        assert len(orders) == 1
+        assert orders[0]["client_order_id"] == "open-1"
+
+    async def test_excludes_cancelled_orders(self, repo):
+        await _insert_order(repo, "open-1", "PAPER_OPEN")
+        await _insert_order(repo, "cancelled-1", "CANCELLED")
+        orders = await repo.get_open_orders("BTCUSDT")
+        assert len(orders) == 1
+
+    async def test_returns_empty_when_no_open_orders(self, repo):
+        await _insert_order(repo, "filled-1", "PAPER_FILLED")
+        orders = await repo.get_open_orders("BTCUSDT")
+        assert orders == []
+
+    async def test_returns_live_open_orders(self, repo):
+        await _insert_order(repo, "live-1", "OPEN")
+        orders = await repo.get_open_orders("BTCUSDT")
+        assert any(o["client_order_id"] == "live-1" for o in orders)
+
+
+class TestCandleCrud:
+    async def test_upsert_and_get_single_candle(self, repo):
+        candle = {
+            "symbol": "BTCUSDT", "interval": "1m",
+            "open_time": 1_700_000_000_000,
+            "open": 50000.0, "high": 51000.0,
+            "low": 49000.0, "close": 50500.0, "volume": 1.5,
+        }
+        await repo.upsert_candle(candle)
+        rows = await repo.get_candles("BTCUSDT", "1m", limit=10)
+        assert len(rows) == 1
+        assert abs(rows[0]["close"] - 50500.0) < 1e-9
+
+    async def test_upsert_is_idempotent(self, repo):
+        candle = {
+            "symbol": "BTCUSDT", "interval": "1m",
+            "open_time": 1_700_000_000_000,
+            "open": 50000.0, "high": 51000.0,
+            "low": 49000.0, "close": 50500.0, "volume": 1.5,
+        }
+        await repo.upsert_candle(candle)
+        candle["close"] = 50800.0
+        await repo.upsert_candle(candle)  # same open_time → replace
+        rows = await repo.get_candles("BTCUSDT", "1m", limit=10)
+        assert len(rows) == 1
+        assert abs(rows[0]["close"] - 50800.0) < 1e-9
+
+    async def test_get_candles_returns_oldest_first(self, repo):
+        for i, t in enumerate([1_000_000, 2_000_000, 3_000_000]):
+            await repo.upsert_candle({
+                "symbol": "BTCUSDT", "interval": "1m", "open_time": t,
+                "open": 50000.0, "high": 50100.0, "low": 49900.0,
+                "close": 50050.0, "volume": 0.0,
+            })
+        rows = await repo.get_candles("BTCUSDT", "1m", limit=10)
+        times = [r["open_time"] for r in rows]
+        assert times == sorted(times)
+
+    async def test_get_candles_respects_limit(self, repo):
+        for i in range(20):
+            await repo.upsert_candle({
+                "symbol": "BTCUSDT", "interval": "1m", "open_time": i * 60_000,
+                "open": 50000.0, "high": 50100.0, "low": 49900.0,
+                "close": 50000.0, "volume": 0.0,
+            })
+        rows = await repo.get_candles("BTCUSDT", "1m", limit=5)
+        assert len(rows) == 5
+
+    async def test_get_candles_returns_most_recent_within_limit(self, repo):
+        for i in range(10):
+            await repo.upsert_candle({
+                "symbol": "BTCUSDT", "interval": "1m", "open_time": i * 60_000,
+                "open": 50000.0, "high": 50100.0, "low": 49900.0,
+                "close": float(50000 + i), "volume": 0.0,
+            })
+        rows = await repo.get_candles("BTCUSDT", "1m", limit=3)
+        closes = [r["close"] for r in rows]
+        # Should be the last 3 candles (closes 50007, 50008, 50009)
+        assert min(closes) >= 50007.0
+
+
+class TestInsertTrade:
+    async def test_insert_trade_persisted(self, repo):
+        import time
+        trade = {
+            "client_order_id": "order-1",
+            "symbol": "BTCUSDT",
+            "side": "SELL",
+            "price": 51000.0,
+            "quantity": 0.001,
+            "fee": 0.05,
+            "fee_asset": "USDT",
+            "timestamp": time.time(),
+        }
+        await repo.insert_trade(trade)
+        # Verify via raw DB query
+        async with repo._db.execute(
+            "SELECT * FROM trades WHERE client_order_id = ?", ("order-1",)
+        ) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        assert abs(dict(row)["price"] - 51000.0) < 1e-9
+
+    async def test_insert_multiple_trades(self, repo):
+        import time
+        for i in range(3):
+            await repo.insert_trade({
+                "client_order_id": f"order-{i}",
+                "symbol": "BTCUSDT", "side": "SELL",
+                "price": 50000.0 + i, "quantity": 0.001,
+                "fee": 0.05, "fee_asset": "USDT",
+                "timestamp": time.time(),
+            })
+        async with repo._db.execute("SELECT COUNT(*) FROM trades") as cur:
+            count = (await cur.fetchone())[0]
+        assert count == 3
