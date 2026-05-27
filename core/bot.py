@@ -67,6 +67,8 @@ class Bot:
         self._listen_key: Optional[str] = None
         self._listen_key_refreshed_at: float = 0.0
 
+        self._tick_in_flight: bool = False
+
         self._risk.set_stop_callback(self._on_risk_stop)
         self._executor.set_fill_callback(self._on_paper_fill)
 
@@ -137,32 +139,44 @@ class Bot:
         """
         Synchronous — called from WS message handler.
         Schedules async work without blocking the WS receive loop.
+
+        The risk velocity check runs synchronously on every tick so no price
+        point is ever skipped from the history window. The heavier async work
+        (Redis, SQLite, AI, fill simulation) is skipped when a previous tick
+        is still being processed — only the latest price ever matters for grid
+        logic, so there is no value in queuing stale ticks.
         """
+        self._last_price = price
+        # Risk check is sync and must see every price point.
+        risk_state = self._risk.on_price(price)
+        if risk_state == RiskState.EMERGENCY_STOP:
+            return
+
+        if self._tick_in_flight:
+            return
+        self._tick_in_flight = True
         asyncio.get_running_loop().create_task(self._process_tick(price))
 
     async def _process_tick(self, price: float) -> None:
-        if self._state in (BotState.EMERGENCY_STOP, BotState.STOPPING):
-            return
+        try:
+            if self._state in (BotState.EMERGENCY_STOP, BotState.STOPPING):
+                return
 
-        self._last_price = price
-        await self._cache.set_price(self._symbol, price)
-        await self._candles.on_price(price)
+            await self._cache.set_price(self._symbol, price)
+            await self._candles.on_price(price)
 
-        # Risk velocity check (sync, no I/O)
-        risk_state = self._risk.on_price(price)
-        if risk_state == RiskState.EMERGENCY_STOP:
-            return  # _on_risk_stop already called
+            # Paper fill simulation — only when actively running (not PAUSED/COOLDOWN)
+            if self._mode in ("paper", "dry_run") and self._state == BotState.RUNNING:
+                await self._executor.simulate_fills(price)
 
-        # Paper fill simulation — only when actively running (not PAUSED/COOLDOWN)
-        if self._mode in ("paper", "dry_run") and self._state == BotState.RUNNING:
-            await self._executor.simulate_fills(price)
+            # AI regime check (rate-limited)
+            await self._maybe_update_regime(price)
 
-        # AI regime check (rate-limited)
-        await self._maybe_update_regime(price)
-
-        # Push monitoring snapshot
-        if self._monitoring:
-            self._monitoring.update(self._build_snapshot())
+            # Push monitoring snapshot
+            if self._monitoring:
+                self._monitoring.update(self._build_snapshot())
+        finally:
+            self._tick_in_flight = False
 
     # ------------------------------------------------------------------ #
     # Order execution event handler
