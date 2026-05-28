@@ -29,6 +29,7 @@ WORKDIR /app
 # Runtime dependency: piwheels numpy links against OpenBLAS at runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libopenblas0 \
+    libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
