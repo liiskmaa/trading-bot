@@ -72,6 +72,10 @@ docker compose -f docker/docker-compose.yml exec bot python main.py train-regime
 docker compose -f docker/docker-compose.yml restart bot
 ```
 
+Training prints a label distribution and validation report. If `trending` shows zero samples, BTC hasn't trended during your collection window — that's fine, retrain after a week when you have more diverse data.
+
+After restart the bot loads the model and logs `ML regime: ranging` (or `high_volatility`) every minute. When it logs `ranging`, it is actively placing grid orders.
+
 The bot runs safely without a trained model — it defaults to pausing trading until training is done.
 
 ---
@@ -481,16 +485,21 @@ If your Pi is running 32-bit OS (`armhf`) and you want to upgrade to 64-bit for 
 After the bot has been running for at least 8 hours (or after a backtest has populated the database), train the regime classifier:
 
 ```bash
-# directly on the Pi
-python main.py train-regime
-
-# or inside Docker
-docker compose exec bot python main.py train-regime
+docker compose -f docker/docker-compose.yml exec bot python main.py train-regime
+docker compose -f docker/docker-compose.yml restart bot
 ```
 
 Training reads all stored 1-minute candles, labels each point by what actually happened in the following 30 minutes, and fits a gradient-boosted classifier. The model is saved to `data/regime_model.pkl` (inside the `bot_data` volume) and loaded automatically on the next bot start.
 
-The bot does not need to be stopped to train — but you need to restart it (or send it a signal) to reload the new model. The simplest approach is to train, then `docker compose restart bot`.
+**Reading the training output:**
+```
+Training on 622 candles...
+Label distribution: {'ranging': 482, 'trending': 0, 'high_volatility': 50}
+```
+- All three labels should ideally have samples. `trending: 0` means the market hasn't trended during your collection window — the bot will still work, it just won't recognise trends yet. Retrain after a week of data.
+- After restart you should see `ML regime: ranging` in the logs. The bot will start placing orders.
+
+**Note:** use `restart` here (not `up -d`) — training writes to the data volume, not the image, so no container recreation is needed.
 
 Retrain whenever you've collected significantly more history, or if the bot seems to be pausing/resuming at the wrong times.
 
@@ -556,11 +565,18 @@ The trainer doesn't need human annotation. For each point in history it looks 30
 python main.py train-regime
 ```
 
-The command prints the label distribution and a validation report. You want all three classes represented — if `trending` or `high_volatility` show zero samples, the dataset doesn't yet cover a diverse enough market period. Run a backtest first (`python main.py backtest --start 2024-01-01 --end 2024-12-31`) to populate the candle database before training.
+The command prints the label distribution and a validation report. You want all three classes represented — if `trending` or `high_volatility` show zero samples, the dataset doesn't yet cover a diverse enough market period. This is normal on first train after 8 hours; retrain after a week.
+
+If you want better initial coverage, run a backtest first to populate the candle database with months of history, then train:
+```bash
+docker compose -f docker/docker-compose.yml exec bot python main.py backtest --start 2024-01-01 --end 2024-12-31
+docker compose -f docker/docker-compose.yml exec bot python main.py train-regime
+docker compose -f docker/docker-compose.yml restart bot
+```
 
 Minimum: 500 candles (~8 hours). Recommended: several weeks or months covering both quiet and volatile periods.
 
-Retrain periodically — monthly is a reasonable cadence. The old model stays active and safe until you replace it.
+Retrain periodically — monthly is a reasonable cadence, or after any significant market regime change. The old model stays active and safe until you replace it.
 
 ---
 
