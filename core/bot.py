@@ -22,11 +22,10 @@ from risk.manager import RiskState
 logger = logging.getLogger(__name__)
 
 # How often to run the listen-key keepalive (seconds)
-_KEEPALIVE_INTERVAL = 25 * 60
-# How often to check cooldown expiry / log heartbeat
-_HEARTBEAT_INTERVAL = 30
-# Minimum seconds between AI calls (guard in addition to classifier's own rate limit)
-_AI_POLL_INTERVAL = 60
+_KEEPALIVE_INTERVAL  = 25 * 60
+_HEARTBEAT_INTERVAL  = 30
+_AI_POLL_INTERVAL    = 60
+_DB_HEARTBEAT_INTERVAL = 60 * 60  # write a DB heartbeat once per hour
 
 
 class Bot:
@@ -68,6 +67,7 @@ class Bot:
         self._listen_key_refreshed_at: float = 0.0
 
         self._tick_in_flight: bool = False
+        self._last_db_heartbeat: float = 0.0
 
         self._risk.set_stop_callback(self._on_risk_stop)
         self._executor.set_fill_callback(self._on_paper_fill)
@@ -336,6 +336,27 @@ class Bot:
                 self._ai_regime,
                 self._risk.drawdown_percent,
             )
+
+            now = time.time()
+            if now - self._last_db_heartbeat >= _DB_HEARTBEAT_INTERVAL:
+                open_orders = sum(
+                    1 for lv in self._grid.levels
+                    if lv.status in ("BUY_OPEN", "SELL_OPEN")
+                )
+                await self._repo.log_event(
+                    "HEARTBEAT",
+                    f"state={self._state.value} regime={self._ai_regime} "
+                    f"price={self._last_price:.2f} dd={self._risk.drawdown_percent:.2f}% "
+                    f"open_orders={open_orders}",
+                    data={
+                        "state": self._state.value,
+                        "regime": self._ai_regime,
+                        "price": self._last_price,
+                        "drawdown_percent": self._risk.drawdown_percent,
+                        "open_orders": open_orders,
+                    },
+                )
+                self._last_db_heartbeat = now
 
     async def _keepalive_loop(self) -> None:
         while self._state not in (BotState.STOPPING, BotState.EMERGENCY_STOP):
