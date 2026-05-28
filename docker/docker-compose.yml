@@ -59,7 +59,7 @@ services:
       - bot_logs:/app/logs          # Rotating log files
       - ../config:/app/config:ro    # Config is read-only inside container
     ports:
-      - "8080:8080"                 # Monitoring endpoint
+      - "8088:8080"                 # Monitoring endpoint (8080 reserved by Pi-hole)
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8080/status')"]
