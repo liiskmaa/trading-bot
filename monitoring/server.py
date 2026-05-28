@@ -390,7 +390,7 @@ function initPriceChart() {
           },
           filter: item => item.datasetIndex === 1,
         },
-        annotation: { annotations: {} },
+        annotation: { adjustScaleRange: false, annotations: {} },
       },
     },
   });
