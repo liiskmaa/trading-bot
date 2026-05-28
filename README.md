@@ -639,6 +639,32 @@ sqlite3 data/trading_bot.db \
 
 ---
 
+## Future ideas
+
+These are not implemented but are reasonable next steps once you have validated the strategy with real money.
+
+**Dynamic position sizing**
+Instead of a fixed `active_trading_usdt`, the bot reads your actual USDT balance from Binance on each grid rebuild and sizes the grid as a percentage of it:
+
+```yaml
+capital:
+  active_trading_percent: 80  # use 80% of available USDT
+  order_size_percent: 8       # each order = 8% of active capital
+```
+
+This means profits compound automatically — a larger balance deploys more capital. Losses also shrink the position automatically, which is actually a safety property.
+
+**When to add this:** only after you've validated the strategy is net positive over several weeks of live trading. Compounding amplifies both gains and losses — don't enable it before you trust the strategy.
+
+**Implementation:** ~30 lines. Fetch USDT balance via `BinanceRest` on grid rebuild, calculate `active_capital = balance * active_trading_percent / 100`, pass it into `GridManager` and `RiskManager` instead of the fixed config value.
+
+---
+
+**Multi-symbol support**
+Run independent bot instances per symbol (e.g. ETHUSDT alongside BTCUSDT) using separate Docker Compose services with separate config files. Each bot has its own grid, database, and risk manager. No code changes needed — just add a second service to `docker-compose.yml`.
+
+---
+
 ## Limits to keep in mind
 
 - `max_drawdown_percent` — don't raise above 10%
