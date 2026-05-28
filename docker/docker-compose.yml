@@ -49,6 +49,7 @@ services:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS__HOST=redis   # Docker service name — overrides config.yaml "localhost"
       # Override config values via env vars if needed:
       # BINANCE_API_KEY and BINANCE_API_SECRET are read by config/config.yaml
       # Prefer using .env file (see .env.example)

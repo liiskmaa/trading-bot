@@ -121,10 +121,12 @@ def build_bot(cfg: Config, mode_override: str | None = None) -> Bot:
     )
     ai.inject(cache, symbol)
 
-    # WebSocket (callbacks wired after Bot is created)
+    # WebSocket (callbacks wired after Bot is created).
+    # Use testnet WS only in live mode — testnet's market data streams are
+    # unreliable and paper/dry_run place no real orders via WebSocket.
     ws = BinanceWebSocket(
         symbol=symbol,
-        testnet=testnet,
+        testnet=testnet and mode == "live",
         on_price=lambda p: None,    # replaced below after Bot init
         on_execution=lambda e: None,
         reconnect_delay=cfg.float("binance", "ws_reconnect_delay_seconds", default=5.0),
