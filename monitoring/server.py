@@ -49,7 +49,6 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -321,6 +320,38 @@ Chart.defaults.color = '#4a5a7a';
 Chart.defaults.font.family = "'JetBrains Mono', monospace";
 Chart.defaults.font.size   = 10;
 
+/* ── Custom plugin: draw grid level lines on canvas (bypasses scale expansion) ── */
+Chart.register({
+  id: 'gridLevelLines',
+  afterDraw(chart) {
+    const levels = chart._gridLevels;
+    if (!levels || levels.length === 0) return;
+    const {ctx, chartArea: {left, right, top, bottom}, scales: {y}} = chart;
+    levels.forEach(lv => {
+      const py = y.getPixelForValue(lv.price);
+      if (py < top || py > bottom) return;
+      const active = lv.status === 'BUY_OPEN' || lv.status === 'SELL_OPEN';
+      ctx.save();
+      ctx.setLineDash([3, 5]);
+      ctx.strokeStyle = levelColor(lv.status, active ? 0.9 : 0.35);
+      ctx.lineWidth = active ? 1 : 0.5;
+      ctx.beginPath();
+      ctx.moveTo(left, py);
+      ctx.lineTo(right, py);
+      ctx.stroke();
+      if (active) {
+        ctx.setLineDash([]);
+        ctx.font = "9px 'JetBrains Mono', monospace";
+        ctx.fillStyle = levelColor(lv.status, 1);
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('$' + Math.round(lv.price).toLocaleString(), right - 4, py - 1);
+      }
+      ctx.restore();
+    });
+  }
+});
+
 /* ── Price chart ── */
 let priceChart;
 function initPriceChart() {
@@ -390,7 +421,6 @@ function initPriceChart() {
           },
           filter: item => item.datasetIndex === 1,
         },
-        annotation: { adjustScaleRange: false, annotations: {} },
       },
     },
   });
@@ -512,31 +542,8 @@ function updatePriceChart(s, priceHistory) {
   priceChart.data.datasets[0].data = pts;
   priceChart.data.datasets[1].data = pts;
 
-  // Grid level annotations
-  const annotations = {};
-  (s.grid_levels || []).forEach(lv => {
-    const active = lv.status === 'BUY_OPEN' || lv.status === 'SELL_OPEN';
-    annotations['gl_' + lv.idx] = {
-      type: 'line',
-      scaleID: 'y',
-      value: lv.price,
-      borderColor: levelColor(lv.status, 1),
-      borderWidth: active ? 1 : 0.5,
-      borderDash: [3, 5],
-      label: {
-        display: active,
-        content: '$' + Math.round(lv.price).toLocaleString(),
-        position: 'end',
-        xAdjust: -6,
-        color: levelColor(lv.status, 1),
-        backgroundColor: 'rgba(8,15,30,0.8)',
-        font: { family: "'JetBrains Mono', monospace", size: 9 },
-        padding: { x: 3, y: 2 },
-        borderRadius: 2,
-      },
-    };
-  });
-  priceChart.options.plugins.annotation.annotations = annotations;
+  // Store grid levels for the custom canvas plugin (doesn't affect Y axis scale)
+  priceChart._gridLevels = s.grid_levels || [];
 
   // Zoom Y axis to actual price range so small movements are visible.
   // Minimum visible window = 0.3% of price so even quiet markets show wiggles.
