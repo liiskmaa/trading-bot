@@ -53,8 +53,15 @@ class MACrossover:
             return
         data = event.get("data") or {}
         self._position = data.get("position", "OUT")
-        self._entry_price = float(data.get("price", 0.0))
-        self._qty = float(data.get("qty", 0.0))
+        if self._position == "IN":
+            self._entry_price = float(data.get("price", 0.0))
+            self._qty = float(data.get("qty", 0.0))
+        else:
+            # EXIT event stores entry_price separately so PnL is correct if a
+            # stale SELL order fills after a restart (bot restarted in the ~1s
+            # window between placing the sell and it being filled).
+            self._entry_price = float(data.get("entry_price", 0.0))
+            self._qty = 0.0
         logger.info(
             "MA strategy restored: position=%s entry=%.2f qty=%.5f",
             self._position, self._entry_price, self._qty,
@@ -120,7 +127,7 @@ class MACrossover:
             await self._repo.log_event(
                 "MA_POSITION",
                 f"EXIT sell qty={qty:.5f} @ {price:.2f} pnl={pnl:.2f}",
-                data={"position": "OUT", "price": price, "pnl": pnl},
+                data={"position": "OUT", "price": price, "entry_price": self._entry_price, "pnl": pnl},
             )
             logger.info(
                 "MA strategy: EXIT — sold %.5f BTC @ %.2f  pnl=%.2f USDT",
