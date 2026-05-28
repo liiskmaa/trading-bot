@@ -423,12 +423,14 @@ Transfer to the Pi:
 docker save gridbot:latest | gzip | ssh <user>@<pi-ip> 'docker load'
 ```
 
-### Start
+### Start / update
 
 ```bash
-# on the Pi
+# on the Pi — first start or after loading a new image
 docker compose -f docker/docker-compose.yml up -d
 ```
+
+> **`up -d` vs `restart`**: Always use `up -d` after transferring a new image. `docker compose restart` only restarts the existing container process — it does not pick up a new image. `up -d` recreates the container when the image has changed.
 
 ### Useful commands
 
@@ -445,8 +447,11 @@ curl http://localhost:8088/status
 # graceful stop (state is preserved)
 docker compose -f docker/docker-compose.yml stop bot
 
-# restart
+# restart after training or config change (image unchanged)
 docker compose -f docker/docker-compose.yml restart bot
+
+# deploy a newly built image (recreates the container — use this, not restart)
+docker compose -f docker/docker-compose.yml up -d bot
 
 # full stop
 docker compose -f docker/docker-compose.yml down
