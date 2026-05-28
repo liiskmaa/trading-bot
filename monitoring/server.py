@@ -537,6 +537,18 @@ function updatePriceChart(s, priceHistory) {
     };
   });
   priceChart.options.plugins.annotation.annotations = annotations;
+
+  // Zoom Y axis to actual price range so small movements are visible.
+  // Padding = 20% of the observed range, minimum $200 either side.
+  if (pts.length > 1) {
+    const prices = pts.map(p => p.y);
+    const lo = Math.min(...prices);
+    const hi = Math.max(...prices);
+    const pad = Math.max((hi - lo) * 0.2, 200);
+    priceChart.options.scales.y.min = lo - pad;
+    priceChart.options.scales.y.max = hi + pad;
+  }
+
   priceChart.update('none');
 }
 
