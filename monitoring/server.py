@@ -234,7 +234,7 @@ td:last-child,td:nth-child(3),td:nth-child(4){text-align:right}
       <div class="stat">
         <div class="stat-label">Portfolio</div>
         <div class="stat-value" id="s-portfolio">—</div>
-        <div class="stat-sub">USDT</div>
+        <div class="stat-sub" id="s-portfolio-sub">—</div>
       </div>
       <div class="stat">
         <div class="stat-label">Drawdown</div>
@@ -507,6 +507,12 @@ function updateHeader(s) {
 function updateCards(s) {
   const pv = s.portfolio_value;
   el('s-portfolio').textContent = pv ? fmtPrice(pv) : '—';
+  const subEl = el('s-portfolio-sub');
+  if (s.btc_balance != null && s.usdt_balance != null) {
+    subEl.textContent = (+s.btc_balance).toFixed(5) + ' BTC  +  $' + (+s.usdt_balance).toFixed(2);
+  } else {
+    subEl.textContent = 'USDT';
+  }
 
   const dd = s.drawdown_percent || 0;
   const ddEl = el('s-drawdown');

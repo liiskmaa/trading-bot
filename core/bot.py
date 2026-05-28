@@ -458,9 +458,14 @@ class Bot:
             "open_orders": len(
                 [lv for lv in self._grid.levels if lv.status in ("BUY_OPEN", "SELL_OPEN")]
             ),
-            "portfolio_value": self._executor.paper_balances.get("USDT", 0)
-            if self._mode in ("paper", "dry_run")
-            else 0,
+            "usdt_balance": self._executor.paper_balances.get("USDT", 0)
+            if self._mode in ("paper", "dry_run") else 0,
+            "btc_balance": self._executor.paper_balances.get("BTC", 0)
+            if self._mode in ("paper", "dry_run") else 0,
+            "portfolio_value": (
+                self._executor.paper_balances.get("USDT", 0)
+                + self._executor.paper_balances.get("BTC", 0) * self._last_price
+            ) if self._mode in ("paper", "dry_run") else 0,
             "consecutive_losses": self._risk.consecutive_losses,
             "cooldown_remaining": round(self._risk.cooldown_remaining_seconds, 0),
             "grid_levels": [
