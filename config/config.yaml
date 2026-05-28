@@ -13,7 +13,7 @@ capital:
   order_size_usdt: 29.0      # ~27 EUR per grid level
 
 grid:
-  range_percent: 2.0         # ±2% around current price
+  range_percent: 3.0         # ±3% around current price
   levels: 20
   # Grid is rebuilt when price moves outside current range
   rebuild_threshold_percent: 3.0
