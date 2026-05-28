@@ -539,14 +539,17 @@ function updatePriceChart(s, priceHistory) {
   priceChart.options.plugins.annotation.annotations = annotations;
 
   // Zoom Y axis to actual price range so small movements are visible.
-  // Padding = 20% of the observed range, minimum $200 either side.
+  // Minimum visible window = 0.3% of price (~$220 at $73k BTC) so even
+  // quiet markets show wiggles rather than a flat line.
   if (pts.length > 1) {
     const prices = pts.map(p => p.y);
     const lo = Math.min(...prices);
     const hi = Math.max(...prices);
-    const pad = Math.max((hi - lo) * 0.2, 200);
-    priceChart.options.scales.y.min = lo - pad;
-    priceChart.options.scales.y.max = hi + pad;
+    const mid = (hi + lo) / 2;
+    const range = Math.max(hi - lo, mid * 0.003);
+    const pad = range * 0.3;
+    priceChart.options.scales.y.min = mid - range / 2 - pad;
+    priceChart.options.scales.y.max = mid + range / 2 + pad;
   }
 
   priceChart.update('none');
