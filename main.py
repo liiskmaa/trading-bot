@@ -25,6 +25,7 @@ from grid_engine import GridManager
 from execution import OrderExecutor, Reconciler
 from risk import RiskManager
 from ai_filter import MarketClassifier
+from ma_strategy import MACrossover
 from backtesting import BacktestEngine
 from database import Repository
 from cache import Cache
@@ -147,6 +148,19 @@ def build_bot(cfg: Config, mode_override: str | None = None) -> Bot:
     # Wire grid manager deps
     grid_manager.inject(repo, cache, executor)
 
+    # MA crossover strategy (disabled by default)
+    ma_strategy = None
+    if cfg.bool("ma_strategy", "enabled", default=False):
+        ma_strategy = MACrossover(
+            repo=repo,
+            executor=executor,
+            symbol=symbol,
+            fast_period=cfg.int("ma_strategy", "fast_period", default=20),
+            slow_period=cfg.int("ma_strategy", "slow_period", default=50),
+            capital_usdt=cfg.float("capital", "active_trading_usdt", default=324.0),
+            mode=mode,
+        )
+
     bot = Bot(
         config=cfg,
         repo=repo,
@@ -160,6 +174,7 @@ def build_bot(cfg: Config, mode_override: str | None = None) -> Bot:
         risk=risk,
         ai_classifier=ai,
         monitoring=monitoring,
+        ma_strategy=ma_strategy,
     )
 
     # Wire WebSocket callbacks to bot handlers

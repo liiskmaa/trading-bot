@@ -1,6 +1,6 @@
-# BTC/USDT Grid Trading Bot
+# BTC/USDT Trading Bot
 
-Grid trading bot for Binance BTC/USDT. Runs unattended on a Raspberry Pi. Designed for small capital (~500 EUR) with an emphasis on not blowing up.
+Grid trading bot for Binance BTC/USDT with an optional moving-average crossover strategy. Runs unattended on a Raspberry Pi. Designed for small capital (~500 EUR) with an emphasis on not blowing up.
 
 <a href="https://ko-fi.com/jaanek">
   <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy Me a Coffee at ko-fi.com" />
@@ -86,29 +86,52 @@ Grid trading doesn't try to predict where price is going. Instead, it places a l
 
 When a buy order fills, the bot immediately places a sell order one step higher. When that sell fills, it places another buy at the original level. Each completed cycle captures the price difference between adjacent levels as profit, minus fees.
 
-Here's what the grid looks like around a $50,000 BTC price with 10 levels and ±5% range:
+Here's what the grid looks like around a $74,000 BTC price with 20 levels and ±3% range (current defaults):
 
 ```
-Level 9 — $52,500  → SELL
-Level 8 — $51,944  → SELL
-Level 7 — $51,389  → SELL
-Level 6 — $50,833  → SELL
-Level 5 — $50,278  → SELL
-─ ─ ─ ─ ─ $50,000  (current price)
-Level 4 — $49,722  → BUY
-Level 3 — $49,167  → BUY
-Level 2 — $48,611  → BUY
-Level 1 — $48,056  → BUY
-Level 0 — $47,500  → BUY
+Level 19 — $76,220  → SELL
+Level 18 — $75,986  → SELL
+...
+Level 11 — $74,296  → SELL
+─ ─ ─ ─ ─  $74,000  (current price)
+Level 10 — $73,778  → BUY
+...
+Level  1 — $72,236  → BUY
+Level  0 — $71,780  → BUY
 ```
 
-BTC drops to $49,722 → buy fills → sell placed at $50,278.  
-BTC recovers to $50,278 → sell fills → buy placed again at $49,722.  
-Net profit per cycle: roughly $0.15–0.30 after fees, depending on order size.
+Step between levels: ~$222 (~0.3%). BTC drops $222 → buy fills → sell placed $222 higher. BTC recovers → sell fills → buy placed again. Net profit per cycle: roughly ~0.1% after fees (~$0.03 per $29 order).
 
-All 10 levels run in parallel, 24 hours a day.
+All 20 levels run in parallel, 24 hours a day.
 
 **What kills this strategy:** a strong trend in one direction. In a downtrend, buy orders keep filling but sells don't, leaving you holding BTC that's worth less than what you paid. The AI filter watches for this and pauses the bot when conditions turn unfavourable.
+
+**A note on fees:** Binance charges 0.1% per side (0.2% round-trip). With a default grid step of ~0.3% (±3% range / 20 levels), each completed buy→sell cycle earns roughly 0.1% after fees. Tighten the grid below 0.2% step and fees exceed profit — you'd be trading to pay Binance.
+
+---
+
+## Moving-average crossover strategy
+
+An alternative to the grid for trending markets. Instead of many small orders, it takes a single all-in / all-out position based on two moving averages of the daily closing price.
+
+**Signal:**
+- Fast MA (20-day) crosses **above** slow MA (50-day) → buy all active capital (golden cross)
+- Fast MA crosses **below** slow MA → sell everything (death cross)
+
+**Why this can outperform the grid on BTC:** BTC has historically trended for months at a time. The grid earns small amounts oscillating sideways but gives it all back when price moves directionally. The MA strategy catches the big multi-month moves and sits in USDT during downtrends.
+
+**Trade-offs:**
+- Only 2–4 trades per year — long periods of doing nothing
+- Needs ~50 days of candle history before it can generate a signal
+- Checks every 4 hours; does not run on every price tick
+
+**Enable it** in `config/config.yaml`:
+```yaml
+ma_strategy:
+  enabled: true
+```
+
+> **Note:** both strategies share the same capital pool and the same `OrderExecutor`. Running both at once means they compete for the same USDT. Pick one.
 
 ---
 
@@ -180,7 +203,7 @@ Run the tests to make sure everything is in order:
 pytest
 ```
 
-You should see 206 tests pass.
+All 206 tests should pass.
 
 ---
 
@@ -213,14 +236,27 @@ capital:
 
 ```yaml
 grid:
-  range_percent: 5.0               # grid spans ±5% around current price
-  levels: 10                       # number of price rungs
+  range_percent: 3.0               # grid spans ±3% around current price
+  levels: 20                       # number of price rungs
   rebuild_threshold_percent: 3.0   # rebuild when price drifts this far from center
 ```
 
 The grid is automatically rebuilt when price moves far enough that most levels are out of range. It cancels all open orders, recalculates around the new price, and places fresh orders.
 
 Wider range → fewer rebuilds, smaller profit per cycle. Tighter range → more cycles but more rebuilds if price trends.
+
+**Step size matters for fees:** step size = (2 × range_percent) / levels. At 0.1% fee per side, you need a step larger than 0.2% to make any profit at all. The defaults give ~0.3% per step, leaving ~0.1% profit after fees.
+
+### MA crossover strategy
+
+```yaml
+ma_strategy:
+  enabled: false   # set true to use instead of the grid
+  fast_period: 20  # days for the fast moving average
+  slow_period: 50  # days for the slow moving average
+```
+
+Requires ~`slow_period` days of candle history before it can trade. Until then it logs "not enough daily history" and waits. The bot accumulates history automatically while running in paper mode; alternatively populate the database with a backtest first.
 
 ### Risk
 
@@ -584,7 +620,7 @@ Retrain periodically — monthly is a reasonable cadence, or after any significa
 
 Work through these phases in order. The full checklist with checkboxes is in `SAFETY_CHECKLIST.md`.
 
-**Phase 1 — Tests.** Run `pytest` and make sure all 45 pass.
+**Phase 1 — Tests.** Run `pytest` and make sure all 206 pass.
 
 **Phase 2 — Backtest.** At least 3 months of data, ideally a period that includes both ranging and trending conditions. Check the numbers above.
 
@@ -641,7 +677,7 @@ sqlite3 data/trading_bot.db \
 
 ## Future ideas
 
-These are not implemented but are reasonable next steps once you have validated the strategy with real money.
+These are not yet implemented but are reasonable next steps once you have validated the strategy with real money.
 
 **Dynamic position sizing**
 Instead of a fixed `active_trading_usdt`, the bot reads your actual USDT balance from Binance on each grid rebuild and sizes the grid as a percentage of it:

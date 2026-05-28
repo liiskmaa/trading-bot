@@ -239,6 +239,34 @@ class Repository:
             return [dict(r) for r in reversed(rows)]
 
     # ------------------------------------------------------------------ #
+    # Candle aggregation helpers
+    # ------------------------------------------------------------------ #
+
+    async def get_daily_closes(self, symbol: str, limit: int) -> list[float]:
+        """Return the last `limit` daily closing prices (oldest→newest).
+
+        Aggregates stored 1-min candles by calendar day, taking the close
+        of the last minute-candle in each day.  open_time is stored as
+        Unix milliseconds.
+        """
+        async with self._db.execute(
+            """
+            SELECT close FROM (
+                SELECT close, open_time
+                FROM candles
+                WHERE symbol = ? AND interval = '1m'
+                GROUP BY strftime('%Y-%m-%d', open_time / 1000, 'unixepoch')
+                HAVING open_time = MAX(open_time)
+                ORDER BY open_time DESC
+                LIMIT ?
+            ) ORDER BY open_time ASC
+            """,
+            (symbol, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [row[0] for row in rows]
+
+    # ------------------------------------------------------------------ #
     # System events
     # ------------------------------------------------------------------ #
 
@@ -260,3 +288,17 @@ class Repository:
             ),
         )
         await self._db.commit()
+
+    async def get_last_event(self, event_type: str) -> Optional[dict]:
+        """Return the most recent system_events row of a given type, or None."""
+        async with self._db.execute(
+            "SELECT * FROM system_events WHERE event_type = ? ORDER BY timestamp DESC LIMIT 1",
+            (event_type,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        if result.get("data"):
+            result["data"] = json.loads(result["data"])
+        return result

@@ -26,6 +26,7 @@ _KEEPALIVE_INTERVAL  = 25 * 60
 _HEARTBEAT_INTERVAL  = 30
 _AI_POLL_INTERVAL    = 60
 _DB_HEARTBEAT_INTERVAL = 60 * 60  # write a DB heartbeat once per hour
+_MA_CHECK_INTERVAL   = 4 * 60 * 60  # MA crossover check every 4 hours
 
 
 class Bot:
@@ -43,6 +44,7 @@ class Bot:
         risk,
         ai_classifier,
         monitoring: Optional[object] = None,
+        ma_strategy: Optional[object] = None,
     ):
         self._cfg = config
         self._repo = repo
@@ -56,6 +58,7 @@ class Bot:
         self._risk = risk
         self._ai = ai_classifier
         self._monitoring = monitoring
+        self._ma = ma_strategy
 
         self._state = BotState.STARTING
         self._mode = config.str("trading", "mode", default="paper")
@@ -68,6 +71,7 @@ class Bot:
 
         self._tick_in_flight: bool = False
         self._last_db_heartbeat: float = 0.0
+        self._last_ma_check: float = 0.0
 
         self._risk.set_stop_callback(self._on_risk_stop)
         self._executor.set_fill_callback(self._on_paper_fill)
@@ -101,6 +105,9 @@ class Bot:
         elif not restored:
             price = await self._get_initial_price()
             await self._grid.build(price, reason="initial")
+
+        if self._ma:
+            await self._ma.restore()
 
         # Start WebSocket streams after grid is ready
         await self._ws.start()
@@ -241,15 +248,20 @@ class Bot:
             side = order["side"]
             realized_pnl = 0.0
             if side == "SELL":
-                # Realize PnL: sell at fill_price, paired buy was at the level below
                 level_idx = order.get("grid_level_idx") or 0
-                levels = self._grid.levels
-                if 0 < level_idx < len(levels):
-                    buy_price = levels[level_idx - 1].price
-                    realized_pnl = (
-                        fill_price * fill_qty * (1 - 0.001)
-                        - buy_price * fill_qty * (1 + 0.001)
-                    )
+                if level_idx >= 0:
+                    # Grid order — compute PnL from paired grid level
+                    levels = self._grid.levels
+                    if 0 < level_idx < len(levels):
+                        buy_price = levels[level_idx - 1].price
+                        realized_pnl = (
+                            fill_price * fill_qty * (1 - 0.001)
+                            - buy_price * fill_qty * (1 + 0.001)
+                        )
+                else:
+                    # MA order — PnL relative to entry price stored in strategy
+                    if self._ma:
+                        realized_pnl = (fill_price - self._ma.entry_price) * fill_qty
                 portfolio_value = (
                     self._executor.paper_balances.get("USDT", 0)
                     + self._executor.paper_balances.get("BTC", 0) * fill_price
@@ -257,6 +269,10 @@ class Bot:
                 self._risk.on_trade_result(realized_pnl, portfolio_value)
             if self._monitoring:
                 self._monitoring.record_trade(side, fill_price, fill_qty, realized_pnl)
+
+        # MA orders (grid_level_idx == -1) must not be routed to the grid manager
+        if client_order_id.startswith("MA"):
+            return
         await self._grid.on_order_filled(client_order_id, fill_price, fill_qty)
 
     # ------------------------------------------------------------------ #
@@ -328,6 +344,13 @@ class Bot:
                     logger.info("Grid drift detected — rebuilding")
                     await self._grid.cancel_all()
                     await self._grid.build(self._last_price, reason="drift")
+
+            # MA crossover check (rate-limited to _MA_CHECK_INTERVAL)
+            now = time.time()
+            if self._ma and self._last_price > 0:
+                if now - self._last_ma_check >= _MA_CHECK_INTERVAL:
+                    await self._ma.check(self._last_price)
+                    self._last_ma_check = now
 
             logger.debug(
                 "Heartbeat: state=%s price=%.2f regime=%s dd=%.2f%%",

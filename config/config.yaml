@@ -26,6 +26,15 @@ risk:
   emergency_price_move_percent: 7.0
   emergency_price_window_seconds: 300
 
+# Moving-average crossover strategy.
+# Set enabled: true to use instead of (or alongside) the grid.
+# Needs ~slow_period days of candle history before it can trade.
+# Note: shares the same capital pool as the grid — enable one or the other.
+ma_strategy:
+  enabled: false
+  fast_period: 20
+  slow_period: 50
+
 ai_filter:
   enabled: true
   cache_ttl_seconds: 60
