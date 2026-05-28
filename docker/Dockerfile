@@ -26,6 +26,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Runtime dependency: piwheels numpy links against OpenBLAS at runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopenblas0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy installed packages from builder
 COPY --from=builder /root/.local /root/.local
 
