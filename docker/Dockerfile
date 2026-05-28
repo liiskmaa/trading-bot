@@ -44,6 +44,7 @@ COPY grid_engine/  grid_engine/
 COPY execution/    execution/
 COPY risk/         risk/
 COPY ai_filter/    ai_filter/
+COPY ma_strategy/  ma_strategy/
 COPY backtesting/  backtesting/
 COPY database/     database/
 COPY cache/        cache/
