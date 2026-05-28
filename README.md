@@ -10,44 +10,61 @@ Grid trading bot for Binance BTC/USDT. Runs unattended on a Raspberry Pi. Design
 
 ## Quick start (Raspberry Pi)
 
-Five commands to go from zero to a running bot in paper mode.
+**Important: build the Docker image on your Mac/PC, not on the Pi.** Compiling numpy and scikit-learn from source on the Pi will freeze it. The Mac cross-compiles for ARM in a few minutes; the Pi just runs the finished image.
 
-**1. Pull the code**
+**1. On the Pi — pull the code and add API keys**
 ```bash
 git clone https://github.com/your-repo/trading-bot.git
 cd trading-bot
-```
-
-**2. Add API keys**
-```bash
 cp .env.example .env
 nano .env   # paste your Binance testnet keys, save with Ctrl+X → Y → Enter
 ```
 Get testnet keys at [testnet.binance.vision](https://testnet.binance.vision) — no real money involved.
 
-**3. Build the bot image** *(takes 5–10 min first time)*
+**2. Check your Pi's architecture**
 ```bash
-docker build -t gridbot:latest -f docker/Dockerfile .
+dpkg --print-architecture
+```
+- `arm64` → 64-bit OS (most Raspberry Pi OS installs from 2023+)
+- `armhf` → 32-bit OS (older installs)
+
+**3. On your Mac — build for the correct platform**
+
+For 64-bit Pi:
+```bash
+docker buildx build --platform linux/arm64 -t gridbot:latest -f docker/Dockerfile .
 ```
 
-**4. Start everything**
+For 32-bit Pi:
+```bash
+docker buildx build --platform linux/arm/v7 -t gridbot:latest -f docker/Dockerfile .
+```
+
+**4. On your Mac — transfer the image to the Pi**
+```bash
+docker save gridbot:latest | gzip | ssh <user>@<pi-ip> 'docker load'
+```
+
+**5. On the Pi — start everything**
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ```
 This starts Redis, the bot, Prometheus, and Grafana all at once.
 
-**5. Check it's working**
+**6. Check it's working**
 ```bash
 docker compose -f docker/docker-compose.yml logs -f bot
 ```
-You should see the grid being built and price ticks arriving. Press `Ctrl+C` to stop following logs — the bot keeps running.
+You should see `Redis connected`, `Grid built`, `Ticker WS connected`, and `Bot RUNNING`. Press `Ctrl+C` to stop following logs — the bot keeps running.
 
 **Open the dashboards** (replace `<pi-ip>` with your Pi's IP — find it with `hostname -I`):
 
 | What | URL |
 |---|---|
-| Bot status | `http://<pi-ip>:8080` |
+| Bot status | `http://<pi-ip>:8088` |
 | Grafana | `http://<pi-ip>:3000` — login: admin / admin |
+
+> Port 8088 is used because 8080 is a common conflict (Pi-hole, Home Assistant, etc.). Change `"8088:8080"` in `docker-compose.yml` if needed.
 
 **After ~8 hours — train the AI classifier**
 ```bash
@@ -55,7 +72,7 @@ docker compose -f docker/docker-compose.yml exec bot python main.py train-regime
 docker compose -f docker/docker-compose.yml restart bot
 ```
 
-The bot is safe to run without the trained model — it defaults to pausing trading until training is done.
+The bot runs safely without a trained model — it defaults to pausing trading until training is done.
 
 ---
 
@@ -334,7 +351,7 @@ Run backtest across multiple date ranges, not just a single favourable one.
 
 ### Built-in dashboard
 
-Open `http://<host>:8080/` in any browser while the bot is running and you get a live dashboard — no setup, no external services, just the built-in HTTP server.
+Open `http://<host>:8088/` in any browser while the bot is running and you get a live dashboard — no setup, no external services, just the built-in HTTP server.
 
 The dashboard is a single page that polls the bot every 3 seconds. It shows:
 
@@ -348,9 +365,9 @@ The header shows bot state (running / paused / cooldown / emergency stop), curre
 For scripting and external monitoring, the underlying endpoints are also available:
 
 ```
-GET http://<host>:8080/status   → current bot state as JSON
-GET http://<host>:8080/history  → price history, portfolio history, recent trades as JSON
-GET http://<host>:8080/metrics  → Prometheus metrics
+GET http://<host>:8088/status   → current bot state as JSON
+GET http://<host>:8088/history  → price history, portfolio history, recent trades as JSON
+GET http://<host>:8088/metrics  → Prometheus metrics
 ```
 
 ### Grafana dashboard
@@ -380,25 +397,36 @@ If you're accessing Grafana from another machine on the network, replace `localh
 
 ## Raspberry Pi deployment
 
-The recommended setup is Docker Compose. Four containers start together: Redis, the bot, Prometheus, and Grafana. The AI classifier runs inside the bot container — no additional services needed beyond what's in the compose file.
+Four containers start together: Redis, the bot, Prometheus, and Grafana. The AI classifier runs inside the bot container — no additional services needed.
 
-### Build the image
+### Build on your Mac, not the Pi
 
-From your development machine (cross-compiling for ARM):
+The Pi will freeze if you try to compile numpy/scikit-learn from source. Always build on your Mac and transfer the finished image.
 
+First check your Pi's OS type:
 ```bash
-docker buildx build --platform linux/arm64 -t gridbot:latest -f docker/Dockerfile .
+# on the Pi
+dpkg --print-architecture   # arm64 = 64-bit,  armhf = 32-bit
 ```
 
-Or build directly on the Pi:
-
+Build on the Mac:
 ```bash
-docker build -t gridbot:latest -f docker/Dockerfile .
+# 64-bit Pi (arm64)
+docker buildx build --platform linux/arm64 -t gridbot:latest -f docker/Dockerfile .
+
+# 32-bit Pi (armhf)
+docker buildx build --platform linux/arm/v7 -t gridbot:latest -f docker/Dockerfile .
+```
+
+Transfer to the Pi:
+```bash
+docker save gridbot:latest | gzip | ssh <user>@<pi-ip> 'docker load'
 ```
 
 ### Start
 
 ```bash
+# on the Pi
 docker compose -f docker/docker-compose.yml up -d
 ```
 
@@ -406,31 +434,42 @@ docker compose -f docker/docker-compose.yml up -d
 
 ```bash
 # follow logs
-docker compose logs -f bot
+docker compose -f docker/docker-compose.yml logs -f bot
 
-# built-in dashboard (from another machine, use the Pi's IP)
-# http://localhost:8080/
+# built-in dashboard — http://<pi-ip>:8088
+curl http://localhost:8088/status
 
-# Grafana dashboard — login: admin / admin
-# http://localhost:3000/
-
-# Prometheus raw query UI
-# http://localhost:9090/
-
-# pull the bot status as JSON
-curl http://localhost:8080/status
+# Grafana — http://<pi-ip>:3000  (admin / admin)
+# Prometheus — http://<pi-ip>:9090
 
 # graceful stop (state is preserved)
-docker compose stop bot
+docker compose -f docker/docker-compose.yml stop bot
 
 # restart
-docker compose restart bot
+docker compose -f docker/docker-compose.yml restart bot
 
 # full stop
-docker compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
-Data (database, logs) is stored in named volumes and survives restarts and image rebuilds. Don't run `docker compose down -v` unless you mean to wipe everything.
+Data (database, logs, trained model) is stored in named volumes and survives restarts and image rebuilds. Don't run `docker compose down -v` unless you mean to wipe everything.
+
+### Known issues
+
+**Port conflict on 8088 (or any port)**
+The bot monitoring port defaults to 8088. If another service on the Pi uses that port, change the left side of `"8088:8080"` in `docker-compose.yml` to any free port.
+
+**Memory limit warnings**
+```
+Your kernel does not support memory limit capabilities
+```
+This appears on Raspberry Pi OS because cgroup memory is disabled by default. It's harmless — the memory limits are just ignored. To enable properly, add `cgroup_enable=memory cgroup_memory=1` to the end of `/boot/firmware/cmdline.txt` (one line, no newline) and reboot.
+
+**Bot PAUSED — HIGH VOLATILITY on first start**
+Expected. The AI classifier has no trained model yet and defaults to pausing trading. Run for ~8 hours then train with `docker compose exec bot python main.py train-regime`.
+
+**Upgrading to 64-bit Raspberry Pi OS**
+If your Pi is running 32-bit OS (`armhf`) and you want to upgrade to 64-bit for better compatibility, flash a fresh 64-bit Raspberry Pi OS image from [raspberrypi.com/software](https://www.raspberrypi.com/software/). This is a clean install — back up your data first.
 
 ### Training the AI filter on the Pi
 
