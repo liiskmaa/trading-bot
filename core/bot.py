@@ -93,9 +93,6 @@ class Bot:
             await self._setup_live_prerequisites()
         elif self._mode == "paper":
             await self._rest.open()
-            self._executor.init_paper_balances(
-                usdt=self._cfg.float("capital", "active_trading_usdt", default=324.0)
-            )
         # dry_run: no REST needed
 
         # Restore grid from DB or build fresh before WebSocket starts delivering ticks
@@ -105,6 +102,11 @@ class Bot:
         elif not restored:
             price = await self._get_initial_price()
             await self._grid.build(price, reason="initial")
+
+        # Paper balances: split capital into USDT + BTC so the initial SELL
+        # orders above price have BTC backing and don't spam "insufficient BTC"
+        if self._mode == "paper":
+            await self._init_paper_balances()
 
         if self._ma:
             await self._ma.restore()
@@ -398,6 +400,24 @@ class Bot:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    async def _init_paper_balances(self) -> None:
+        active_usdt = self._cfg.float("capital", "active_trading_usdt", default=324.0)
+        order_size  = self._cfg.float("capital", "order_size_usdt", default=29.0)
+        num_levels  = self._cfg.int("grid", "levels", default=20)
+        price       = await self._get_initial_price()
+
+        # Half the levels sit above price as SELLs — pre-fund them with BTC
+        sell_levels = num_levels // 2
+        btc_usdt    = sell_levels * order_size
+        btc         = round(btc_usdt / price, 5)
+        usdt        = max(active_usdt - btc_usdt, 0.0)
+
+        self._executor.init_paper_balances(usdt=usdt, btc=btc)
+        logger.info(
+            "Paper balances: USDT=%.2f BTC=%.5f (~%.0f USDT in BTC @ %.2f)",
+            usdt, btc, btc_usdt, price,
+        )
 
     async def _setup_live_prerequisites(self) -> None:
         if not self._cfg.bool("trading", "live_confirmation"):
