@@ -254,6 +254,7 @@ ma_strategy:
   enabled: false   # set true to use instead of the grid
   fast_period: 20  # days for the fast moving average
   slow_period: 50  # days for the slow moving average
+  check_interval_hours: 4  # how often to re-evaluate the crossover signal
 ```
 
 Requires ~`slow_period` days of candle history before it can trade. Until then it logs "not enough daily history" and waits. The bot accumulates history automatically while running in paper mode; alternatively populate the database with a backtest first.

@@ -34,6 +34,7 @@ ma_strategy:
   enabled: false
   fast_period: 20
   slow_period: 50
+  check_interval_hours: 4
 
 ai_filter:
   enabled: true

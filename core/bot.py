@@ -356,10 +356,11 @@ class Bot:
                     await self._grid.cancel_all()
                     await self._grid.build(self._last_price, reason="drift")
 
-            # MA crossover check (rate-limited to _MA_CHECK_INTERVAL)
+            # MA crossover check (rate-limited by config)
             now = time.time()
             if self._ma and self._last_price > 0:
-                if now - self._last_ma_check >= _MA_CHECK_INTERVAL:
+                ma_interval = self._cfg.float("ma_strategy", "check_interval_hours", default=4.0) * 3600
+                if now - self._last_ma_check >= ma_interval:
                     await self._ma.check(self._last_price)
                     self._last_ma_check = now
 
