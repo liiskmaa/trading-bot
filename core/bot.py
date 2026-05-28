@@ -100,7 +100,7 @@ class Bot:
             await self._reconciler.run()
         elif not restored:
             price = await self._get_initial_price()
-            await self._grid.build(price)
+            await self._grid.build(price, reason="initial")
 
         # Start WebSocket streams after grid is ready
         await self._ws.start()
@@ -327,7 +327,7 @@ class Bot:
                 if self._grid.needs_rebuild(self._last_price):
                     logger.info("Grid drift detected — rebuilding")
                     await self._grid.cancel_all()
-                    await self._grid.build(self._last_price)
+                    await self._grid.build(self._last_price, reason="drift")
 
             logger.debug(
                 "Heartbeat: state=%s price=%.2f regime=%s dd=%.2f%%",

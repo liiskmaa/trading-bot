@@ -68,9 +68,10 @@ class GridManager:
     # Grid lifecycle
     # ------------------------------------------------------------------ #
 
-    async def build(self, current_price: float) -> None:
+    async def build(self, current_price: float, reason: str = "initial") -> None:
         """Create a fresh grid and place all initial orders."""
-        logger.info("Building grid around %.2f USDT", current_price)
+        prev_ref = self._reference_price
+        logger.info("Building grid around %.2f USDT (reason=%s)", current_price, reason)
         self._levels = compute_levels(
             current_price, self._range_pct, self._num_levels, self._order_size
         )
@@ -87,11 +88,25 @@ class GridManager:
 
         await self._cache.invalidate_grid_state(self._symbol)
         await self._cache.set_grid_state(self._symbol, self._serialise())
+
+        lower = self._levels[0].price
+        upper = self._levels[-1].price
         logger.info(
             "Grid built: %d levels, lower=%.2f upper=%.2f",
-            self._num_levels,
-            self._levels[0].price,
-            self._levels[-1].price,
+            self._num_levels, lower, upper,
+        )
+        await self._repo.log_event(
+            "GRID_BUILD",
+            f"reason={reason} price={current_price:.2f} levels={self._num_levels} "
+            f"lower={lower:.2f} upper={upper:.2f} prev_ref={prev_ref:.2f}",
+            data={
+                "reason": reason,
+                "price": current_price,
+                "prev_reference_price": prev_ref,
+                "lower": lower,
+                "upper": upper,
+                "levels": self._num_levels,
+            },
         )
 
     async def restore(self) -> bool:

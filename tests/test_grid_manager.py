@@ -31,6 +31,9 @@ class FakeRepo:
     async def clear_grid_levels(self, symbol):
         pass
 
+    async def log_event(self, event_type, message, severity="INFO", data=None):
+        pass
+
 
 class FakeCache:
     async def invalidate_grid_state(self, symbol):
