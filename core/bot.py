@@ -97,8 +97,17 @@ class Bot:
 
         # Restore grid from DB or build fresh before WebSocket starts delivering ticks
         restored = await self._grid.restore()
+        cfg_levels = self._cfg.int("grid", "levels", default=20)
         if restored and self._mode == "live":
             await self._reconciler.run()
+        elif restored and len(self._grid.levels) != cfg_levels:
+            # Config changed (e.g. levels updated) — discard stale grid and rebuild
+            logger.info(
+                "Grid level count mismatch (DB=%d cfg=%d) — rebuilding",
+                len(self._grid.levels), cfg_levels,
+            )
+            price = await self._get_initial_price()
+            await self._grid.build(price, reason="config_change")
         elif not restored:
             price = await self._get_initial_price()
             await self._grid.build(price, reason="initial")
