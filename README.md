@@ -166,7 +166,7 @@ If the worst happens and the drawdown limit fires, you lose at most 8% of the ac
 
 **`dry_run`** — Logs what it would do. No orders placed, no state saved. Useful for verifying your config and watching the grid level calculations.
 
-**`paper`** — Connects to the real Binance WebSocket for live prices, but uses virtual balances. Orders are simulated: when the live price crosses a level, the bot treats it as filled and places the next order. Everything is saved to the database so it survives restarts. No API keys needed.
+**`paper`** — Connects to the real Binance WebSocket for live prices, but uses virtual balances. The starting capital is split roughly 50/50 between USDT and BTC so both the buy orders below price and the sell orders above price have capital backing them from the start. Orders are simulated: when the live price crosses a level, the bot treats it as filled and places the next order. Everything is saved to the database so it survives restarts. No API keys needed.
 
 **`live`** — Real orders, real money. Requires `live_confirmation: true` explicitly set in the config. The bot refuses to start in live mode without this flag — it's not a soft warning.
 
@@ -397,7 +397,7 @@ The dashboard is a single page that polls the bot every 3 seconds. It shows:
 
 - **Price chart** — the last 30 minutes of BTC price, with every grid level overlaid as a horizontal dashed line. Buy levels are green, sell levels are red. Only active (open) orders get a price label so the chart doesn't get cluttered.
 - **Equity curve** — portfolio value over the same 30-minute window, as a filled area chart below the status cards.
-- **Status cards** — portfolio value, drawdown (with a progress bar relative to the 8% limit), number of open orders, consecutive losses, and cooldown countdown if one is active.
+- **Status cards** — portfolio value (USDT + BTC mark-to-market, with a breakdown line showing each separately), drawdown (with a progress bar relative to the 8% limit), number of open orders, consecutive losses, and cooldown countdown if one is active.
 - **Recent trades** — last 50 fills with time, side, price, quantity, and realised P&L. Buy rows show a dash for P&L since the profit is only realised when the paired sell fills.
 
 The header shows bot state (running / paused / cooldown / emergency stop), current price, trading mode, AI regime classification, and how long the bot has been up.
@@ -419,7 +419,7 @@ Panels included:
 | Panel | What it shows |
 |---|---|
 | Drawdown % | Current drawdown with colour thresholds (green → yellow at −4%, red at −8%) |
-| Portfolio Value | Current USDT portfolio value |
+| Portfolio Value | Total mark-to-market value (USDT + BTC × price) |
 | BTC Price | Last known price |
 | Market Regime | Green = ranging (trading active), orange = paused |
 | Open Orders | Number of live limit orders on the grid |
