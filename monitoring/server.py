@@ -262,7 +262,7 @@ td:last-child,td:nth-child(3),td:nth-child(4){text-align:right}
     </div>
 
     <div class="equity-panel">
-      <div class="panel-label">Total Value (USDT + BTC)</div>
+      <div class="panel-label">Realized PnL</div>
       <div class="chart-wrap" id="equity-wrap" style="flex:1;position:relative">
         <canvas id="equity-chart"></canvas>
       </div>
@@ -438,10 +438,10 @@ function initEquityChart() {
   equityChart = new Chart(ctx, {
     type: 'line',
     data: { datasets: [{
-      label: 'Portfolio',
+      label: 'PnL',
       data: [],
-      borderColor: '#a78bfa',
-      backgroundColor: 'rgba(167,139,250,0.1)',
+      borderColor: '#00e5a0',
+      backgroundColor: 'rgba(0,229,160,0.08)',
       fill: true,
       borderWidth: 1.5,
       pointRadius: 0,
@@ -459,7 +459,11 @@ function initEquityChart() {
           border: { color: 'rgba(148,163,184,0.1)' },
         },
         y: {
-          ticks: { callback: v => '$' + v.toFixed(0), color: '#4a5a7a', maxTicksLimit: 4 },
+          ticks: {
+            callback: v => (v >= 0 ? '+' : '') + v.toFixed(2),
+            color: '#7a8faa',
+            maxTicksLimit: 4,
+          },
           grid: { color: 'rgba(255,255,255,0.03)' },
           border: { color: 'rgba(148,163,184,0.1)' },
         },
@@ -472,7 +476,10 @@ function initEquityChart() {
           borderWidth: 1,
           bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
           callbacks: {
-            label: ctx => ' ' + fmtPrice(ctx.parsed.y),
+            label: ctx => {
+              const v = ctx.parsed.y;
+              return ' ' + (v >= 0 ? '+' : '') + v.toFixed(4) + ' USDT';
+            },
             title: ctx => fmtTime(ctx[0].parsed.x),
           },
         },
@@ -578,10 +585,15 @@ function updatePriceChart(s, priceHistory) {
 }
 
 /* ── Update equity chart ── */
-function updateEquityChart(portfolioHistory) {
+function updatePnlChart(pnlHistory) {
   if (!equityChart) return;
-  const pts = (portfolioHistory || []).map(([ts, v]) => ({ x: ts, y: v }));
+  const pts = (pnlHistory || []).map(([ts, v]) => ({ x: ts, y: v }));
   equityChart.data.datasets[0].data = pts;
+  const last = pts.length > 0 ? pts[pts.length - 1].y : 0;
+  const color = last >= 0 ? '#00e5a0' : '#ff6b8a';
+  const bg    = last >= 0 ? 'rgba(0,229,160,0.08)' : 'rgba(255,107,138,0.08)';
+  equityChart.data.datasets[0].borderColor = color;
+  equityChart.data.datasets[0].backgroundColor = bg;
   equityChart.update('none');
 }
 
@@ -619,7 +631,7 @@ function updateTrades(trades) {
 
 /* ── Polling ── */
 let latestStatus  = {};
-let latestHistory = { price_history: [], portfolio_history: [], trades: [] };
+let latestHistory = { price_history: [], pnl_history: [], trades: [] };
 
 async function pollStatus() {
   try {
@@ -635,7 +647,7 @@ async function pollHistory() {
   try {
     const r = await fetch('/history');
     latestHistory = await r.json();
-    updateEquityChart(latestHistory.portfolio_history);
+    updatePnlChart(latestHistory.pnl_history);
     updateTrades(latestHistory.trades);
     updatePriceChart(latestStatus, latestHistory.price_history);
   } catch(e) { console.warn('history poll failed', e); }
@@ -678,9 +690,10 @@ class MonitoringServer:
         self._server: Optional[asyncio.Server] = None
 
         self._state_snapshot: dict = {}
-        self._price_history:     deque = deque(maxlen=_MAX_HISTORY)   # (ts_ms, price)
-        self._portfolio_history: deque = deque(maxlen=_MAX_HISTORY)   # (ts_ms, value)
-        self._trade_history:     deque = deque(maxlen=_MAX_TRADES)    # {ts, side, price, qty, pnl}
+        self._price_history: deque = deque(maxlen=_MAX_HISTORY)   # (ts_ms, price)
+        self._pnl_history:   deque = deque(maxlen=_MAX_HISTORY)   # (ts_ms, cumulative_pnl)
+        self._trade_history: deque = deque(maxlen=_MAX_TRADES)    # {ts, side, price, qty, pnl}
+        self._realized_pnl: float = 0.0
         self._last_sample: float = 0.0
 
     # ------------------------------------------------------------------ #
@@ -698,12 +711,10 @@ class MonitoringServer:
         now = time.time()
         if now - self._last_sample >= _SAMPLE_INTERVAL:
             price = snapshot.get("last_price", 0)
-            portfolio = snapshot.get("portfolio_value", 0)
             ts_ms = int(now * 1000)
             if price > 0:
                 self._price_history.append((ts_ms, price))
-            if portfolio > 0:
-                self._portfolio_history.append((ts_ms, portfolio))
+            self._pnl_history.append((ts_ms, self._realized_pnl))
             self._last_sample = now
 
     def record_trade(
@@ -714,6 +725,8 @@ class MonitoringServer:
         pnl: float = 0.0,
     ) -> None:
         TRADES_TOTAL.labels(side=side).inc()
+        if side == "SELL" and pnl:
+            self._realized_pnl += pnl
         self._trade_history.append({
             "ts":    int(time.time() * 1000),
             "side":  side,
@@ -751,9 +764,9 @@ class MonitoringServer:
 
             elif path.startswith("/history"):
                 body = json.dumps({
-                    "price_history":     list(self._price_history),
-                    "portfolio_history": list(self._portfolio_history),
-                    "trades":            list(reversed(self._trade_history)),
+                    "price_history": list(self._price_history),
+                    "pnl_history":   list(self._pnl_history),
+                    "trades":        list(reversed(self._trade_history)),
                 }).encode()
                 _respond(writer, body, "application/json")
 
