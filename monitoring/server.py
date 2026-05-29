@@ -232,7 +232,7 @@ td:last-child,td:nth-child(3),td:nth-child(4){text-align:right}
   <aside class="sidebar">
     <div class="stat-grid">
       <div class="stat">
-        <div class="stat-label">Portfolio</div>
+        <div class="stat-label">USDT</div>
         <div class="stat-value" id="s-portfolio">—</div>
         <div class="stat-sub" id="s-portfolio-sub">—</div>
       </div>
@@ -262,7 +262,7 @@ td:last-child,td:nth-child(3),td:nth-child(4){text-align:right}
     </div>
 
     <div class="equity-panel">
-      <div class="panel-label">Portfolio Value</div>
+      <div class="panel-label">Total Value (USDT + BTC)</div>
       <div class="chart-wrap" id="equity-wrap" style="flex:1;position:relative">
         <canvas id="equity-chart"></canvas>
       </div>
@@ -511,8 +511,8 @@ function updateHeader(s) {
 /* ── Update stat cards ── */
 function updateCards(s) {
   const pv = s.portfolio_value;
-  el('s-portfolio').textContent = pv ? fmtPrice(pv) : '—';
-  el('s-portfolio-sub').textContent = s.usdt_balance != null ? '$' + (+s.usdt_balance).toFixed(2) + ' USDT' : '—';
+  el('s-portfolio').textContent = s.usdt_balance != null ? '$' + (+s.usdt_balance).toFixed(2) : '—';
+  el('s-portfolio-sub').textContent = pv ? 'total ' + fmtPrice(pv) : '—';
 
   const btc = s.btc_balance;
   const btcEl = el('s-btc');
