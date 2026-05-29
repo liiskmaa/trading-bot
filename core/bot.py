@@ -27,6 +27,7 @@ _HEARTBEAT_INTERVAL  = 30
 _AI_POLL_INTERVAL    = 60
 _DB_HEARTBEAT_INTERVAL = 60 * 60  # write a DB heartbeat once per hour
 _MA_CHECK_INTERVAL   = 4 * 60 * 60  # MA crossover check every 4 hours
+_BALANCE_FETCH_INTERVAL = 60        # refresh live balances every 60 s
 
 
 class Bot:
@@ -72,6 +73,9 @@ class Bot:
         self._tick_in_flight: bool = False
         self._last_db_heartbeat: float = 0.0
         self._last_ma_check: float = 0.0
+        self._last_balance_fetch: float = 0.0
+        self._live_btc_balance: float = 0.0
+        self._live_usdt_balance: float = 0.0
 
         self._risk.set_stop_callback(self._on_risk_stop)
         self._executor.set_fill_callback(self._on_paper_fill)
@@ -364,6 +368,18 @@ class Bot:
                     await self._ma.check(self._last_price)
                     self._last_ma_check = now
 
+            if self._mode == "live" and now - self._last_balance_fetch >= _BALANCE_FETCH_INTERVAL:
+                try:
+                    account = await self._rest.get_account()
+                    for b in account.get("balances", []):
+                        if b["asset"] == "BTC":
+                            self._live_btc_balance = float(b["free"]) + float(b["locked"])
+                        elif b["asset"] == "USDT":
+                            self._live_usdt_balance = float(b["free"]) + float(b["locked"])
+                    self._last_balance_fetch = now
+                except Exception as e:
+                    logger.warning("Failed to fetch live balances: %s", e)
+
             logger.debug(
                 "Heartbeat: state=%s price=%.2f regime=%s dd=%.2f%%",
                 self._state.value,
@@ -460,13 +476,17 @@ class Bot:
                 [lv for lv in self._grid.levels if lv.status in ("BUY_OPEN", "SELL_OPEN")]
             ),
             "usdt_balance": self._executor.paper_balances.get("USDT", 0)
-            if self._mode in ("paper", "dry_run") else 0,
+            if self._mode in ("paper", "dry_run")
+            else self._live_usdt_balance,
             "btc_balance": self._executor.paper_balances.get("BTC", 0)
-            if self._mode in ("paper", "dry_run") else 0,
+            if self._mode in ("paper", "dry_run")
+            else self._live_btc_balance,
             "portfolio_value": (
                 self._executor.paper_balances.get("USDT", 0)
                 + self._executor.paper_balances.get("BTC", 0) * self._last_price
-            ) if self._mode in ("paper", "dry_run") else 0,
+            ) if self._mode in ("paper", "dry_run") else (
+                self._live_usdt_balance + self._live_btc_balance * self._last_price
+            ),
             "consecutive_losses": self._risk.consecutive_losses,
             "cooldown_remaining": round(self._risk.cooldown_remaining_seconds, 0),
             "grid_levels": [

@@ -237,6 +237,11 @@ td:last-child,td:nth-child(3),td:nth-child(4){text-align:right}
         <div class="stat-sub" id="s-portfolio-sub">—</div>
       </div>
       <div class="stat">
+        <div class="stat-label">BTC Held</div>
+        <div class="stat-value" id="s-btc">—</div>
+        <div class="stat-sub" id="s-btc-sub">—</div>
+      </div>
+      <div class="stat">
         <div class="stat-label">Drawdown</div>
         <div class="stat-value" id="s-drawdown">—</div>
         <div class="dd-track"><div class="dd-fill" id="dd-fill"></div></div>
@@ -507,12 +512,15 @@ function updateHeader(s) {
 function updateCards(s) {
   const pv = s.portfolio_value;
   el('s-portfolio').textContent = pv ? fmtPrice(pv) : '—';
-  const subEl = el('s-portfolio-sub');
-  if (s.btc_balance != null && s.usdt_balance != null) {
-    subEl.textContent = (+s.btc_balance).toFixed(5) + ' BTC  +  $' + (+s.usdt_balance).toFixed(2);
-  } else {
-    subEl.textContent = 'USDT';
-  }
+  el('s-portfolio-sub').textContent = s.usdt_balance != null ? '$' + (+s.usdt_balance).toFixed(2) + ' USDT' : '—';
+
+  const btc = s.btc_balance;
+  const btcEl = el('s-btc');
+  btcEl.textContent = btc != null ? (+btc).toFixed(6) + ' BTC' : '—';
+  btcEl.style.color = btc > 0 ? 'var(--yellow)' : 'var(--text)';
+  el('s-btc-sub').textContent = (btc != null && s.last_price)
+    ? fmtPrice((+btc) * s.last_price)
+    : '—';
 
   const dd = s.drawdown_percent || 0;
   const ddEl = el('s-drawdown');
