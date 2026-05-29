@@ -58,7 +58,7 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
   --border:rgba(148,163,184,0.07);
   --border2:rgba(148,163,184,0.14);
   --text:#dde4f0;
-  --muted:#4a5a7a;
+  --muted:#7a8faa;
   --dim:#1e2d47;
   --green:#00e5a0;
   --green-d:rgba(0,229,160,0.12);
@@ -134,7 +134,7 @@ header{
   display:flex;flex-direction:column;gap:.75rem;
 }
 .panel-label{
-  font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
   color:var(--muted);margin-bottom:.25rem;
 }
 .chart-wrap{position:relative}
@@ -152,7 +152,7 @@ header{
   padding:.75rem .875rem;
 }
 .stat.full{grid-column:span 2}
-.stat-label{font-size:.6rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
+.stat-label{font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
 .stat-value{font-family:var(--font-mono);font-size:1.05rem;font-weight:500;transition:color .3s}
 .stat-sub{font-family:var(--font-mono);font-size:.7rem;color:var(--muted);margin-top:.2rem}
 .dd-track{height:2px;background:var(--dim);border-radius:1px;margin-top:.5rem}
