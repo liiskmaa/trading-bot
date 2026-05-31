@@ -14,7 +14,11 @@ capital:
 
 grid:
   range_percent: 3.0         # ±3% around current price
-  levels: 20
+  # 10 levels over ±3% → ~0.667% spacing. Spacing must stay well above
+  # 2×fee (0.2% at 0.1%/side) or fees eat the gross. At 0.667% fees are
+  # ~30% of gross vs ~63% at the old 20-level/0.316% spacing.
+  # Net per completed cycle ≈ order_size × (spacing_frac − 2×fee_rate).
+  levels: 10
   # Grid is rebuilt when price moves outside current range
   rebuild_threshold_percent: 3.0
 
