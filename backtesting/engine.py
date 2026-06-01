@@ -70,6 +70,24 @@ class BacktestEngine:
         logger.info("\n%s", self._metrics)
         return self._metrics
 
+    def run_candles(self, candles: list[dict]) -> BacktestMetrics:
+        """Replay pre-fetched candles (same logic as run, no network fetch).
+
+        Used by the strategy-comparison harness so grid-only is byte-for-byte
+        the same replay the live backtest uses, on a shared candle set.
+        """
+        if len(candles) < 2:
+            raise ValueError("Insufficient candle data for backtest")
+        self._replay(candles)
+        self._metrics = compute_metrics(
+            self._trades, self._active_capital, self._equity_curve
+        )
+        return self._metrics
+
+    @property
+    def equity_curve(self) -> list[float]:
+        return self._equity_curve
+
     @property
     def metrics(self) -> Optional[BacktestMetrics]:
         return self._metrics
